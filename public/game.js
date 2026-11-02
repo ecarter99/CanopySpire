@@ -835,7 +835,7 @@ class NetworkManager {
   }
   selfInfo() { const pl = this.game.player; return { id: this.selfId, name: this.game.selfName, color: this.game.selfColor, p: [pl.pos.x, pl.pos.y, pl.pos.z], r: pl.yaw, s: pl.state }; }
   genCode() { const A = ROOM_ALPHABET; let s = ''; const rnd = crypto.getRandomValues(new Uint32Array(5)); for (let i = 0; i < 5; i++) s += A[rnd[i] % A.length]; return s; }
-  startSolo() { this.mode = 'offline'; this.selfId = 'solo'; this.initAuthority(false); }
+  startSolo() { this.mode = 'offline'; this.selfId = 'solo'; this.initAuthority(true); }
   host(attempt = 0) {
     return new Promise((resolve, reject) => {
       if (!window.Peer) return reject(new Error('PeerJS failed to load (offline?)'));
@@ -873,7 +873,7 @@ class NetworkManager {
     });
   }
   onHostLost() {
-    this.game.toast('Lost connection to host — continuing solo with current world state.');
+    this.game.toast('Lost connection to host — continuing solo in their spire (this session isn’t saved).');
     this.mode = 'offline'; this.hostConn = null; this.selfId = 'solo';
     this.game.clearRemotes(); this.initAuthority(true); this.game.refreshRoomInfo();
   }
@@ -1080,7 +1080,7 @@ function showRegion(t) {
   $('region').innerHTML = `${TIER_NAMES[t]}<small>${TIER_SUB[t]}</small>`; $('region').classList.add('show');
   clearTimeout(ui.regionTimer); ui.regionTimer = setTimeout(() => $('region').classList.remove('show'), 3000);
 }
-$('help').innerHTML = `<b>Controls</b><br><span class="key">WASD</span> move  <span class="key">Shift</span> sprint<br><span class="key">Space</span> jump · again in air = glider<br>Walk into a wall to <b>climb</b> (uses stamina)<br>On wall: <span class="key">Space</span> leap off, <span class="key">W</span>+<span class="key">Space</span> dash up, <span class="key">X</span> let go<br><span class="key">F</span>/<span class="key">RMB</span> grapple to a gold ring<br><span class="key">Q</span> scanner (nodes, resources, thermals)<br><span class="key">E</span> inspect node · <span class="key">1</span><span class="key">2</span><span class="key">3</span> deliver · <span class="key">R</span> calibrate<br><span class="key">Enter</span> chat · <span class="key">H</span> toggle help<br><br><i>Glide into rising thermals to gain height. Restore nodes to bring water, light and greenery back — and to open new routes for everyone.</i>`;
+$('help').innerHTML = `<b>Controls</b><br><span class="key">WASD</span> move  <span class="key">Shift</span> sprint<br><span class="key">Space</span> jump · again in air = glider<br>Walk into a wall to <b>climb</b> (uses stamina)<br>On wall: <span class="key">Space</span> leap off, <span class="key">W</span>+<span class="key">Space</span> dash up, <span class="key">X</span> let go<br><span class="key">F</span>/<span class="key">RMB</span> grapple to a gold ring<br><span class="key">Q</span> scanner (nodes, resources, thermals)<br><span class="key">E</span> inspect node · <span class="key">1</span><span class="key">2</span><span class="key">3</span> deliver · <span class="key">R</span> calibrate<br><span class="key">Enter</span> chat · <span class="key">H</span> toggle help<br><span class="key">Esc</span> game menu (resume / leave)<br><br><i>Glide into rising thermals to gain height. Restore nodes to bring water, light and greenery back — and to open new routes for everyone.</i>`;
 const EMOJIS = ['👋', '👍', '🙌', '🎉', '❓', '⚡', '🌱', '⚙️', '💧', '🌉', '🪂', '❤️'];
 $('emojis').innerHTML = EMOJIS.map(e => `<span>${e}</span>`).join('');
 $('emojis').addEventListener('mousedown', e => { if (e.target.tagName === 'SPAN') { e.preventDefault(); game.net.send({ t: 'CHAT', text: e.target.textContent }); } });
@@ -1187,7 +1187,27 @@ renderer.domElement.addEventListener('mousedown', e => {
   if (document.pointerLockElement !== renderer.domElement) { lockPointer(); return; }
   if (e.button === 2) pressed.add('Grapple');
 });
-$('resume').addEventListener('click', () => lockPointer());
+$('btnResume').addEventListener('click', () => lockPointer());
+$('pause').addEventListener('click', e => { if (e.target === $('pause')) lockPointer(); });
+$('btnInvite').addEventListener('click', async () => {
+  const url = location.origin + location.pathname + '?room=' + game.net.code;
+  try { await navigator.clipboard.writeText(url); $('btnInvite').textContent = '✓ Copied!'; } catch (_) { $('btnInvite').textContent = url; }
+  setTimeout(() => $('btnInvite').textContent = 'Copy invite link', 2500);
+});
+$('btnLeave').addEventListener('click', () => {
+  if (game.net.mode === 'host' && game.net.conns.size > 0 && !confirm('You are hosting — leaving closes the room for everyone. Leave?')) return;
+  saveGame(); game.net.destroy(); game.playing = false;
+  location.href = location.pathname; // clean return to the home screen (drops ?solo / ?room)
+});
+function renderPauseInfo() {
+  const N = game.net, done = [...world.nodes.values()].filter(n => n.restored).length;
+  let h = N.mode === 'offline' ? '<b>Solo session</b>' : N.mode === 'host' ? `<b>Hosting room ${esc(N.code)}</b> · ${game.remotes.size} friend(s) here` : `<b>In room ${esc(N.code)}</b> (guest)`;
+  h += `<br>Spire restored: <b>${done}/${NODE_DEFS.length}</b><br>`;
+  h += game.ownsWorld ? '💾 Progress saves automatically in this browser.' : '👥 This is the host’s spire — progress is saved on their side.';
+  if (N.mode !== 'offline') h += '<br><span style="font-size:12px">The world keeps running while this menu is open.</span>';
+  $('pauseInfo').innerHTML = h;
+  $('btnInvite').classList.toggle('hidden', N.mode === 'offline');
+}
 addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('mousemove', e => {
   if (document.pointerLockElement !== renderer.domElement) return;
@@ -1195,11 +1215,15 @@ addEventListener('mousemove', e => {
 });
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === renderer.domElement;
-  $('resume').classList.toggle('hidden', locked || !game.playing || ui.chatOpen);
+  const show = !locked && game.playing && !ui.chatOpen;
+  if (show) { renderPauseInfo(); keys.clear(); saveGame(); }
+  $('pause').classList.toggle('hidden', !show);
 });
 addEventListener('wheel', e => { cam.dist = clamp(cam.dist + Math.sign(e.deltaY) * 0.8, 3.5, 14); });
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 addEventListener('beforeunload', () => game.net.destroy());
+addEventListener('pagehide', () => saveGame());
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
 
 function readInput() {
   const k = c => keys.has(c), p = c => pressed.has(c);
@@ -1226,7 +1250,7 @@ function deliver(k) {
   const n = world.nodes.get(ui.panelNode); if (!n || n.restored) return;
   const need = (n.def.req[k] || 0) - n.cur[k], amt = Math.min(need, game.inventory[k]);
   if (amt <= 0) { game.toast(need <= 0 ? `${RES_ICON[k]} already complete here` : `You have no ${RES_ICON[k]} ${RES_NAME[k]}`); return; }
-  game.inventory[k] -= amt; renderInventory();
+  game.inventory[k] -= amt; renderInventory(); saveSoon();
   game.net.send({ t: 'NODE_DELIVER', node: n.id, res: { [k]: amt } });
 }
 function openMinigame(n) { ui.mg = { node: n.id, t: Math.random() * 6, zone: 0.15 + Math.random() * 0.6, w: 0.17, lock: 0, speed: 2.2 + n.calib * 0.5 }; $('minigame').classList.remove('hidden'); $('mgZone').style.left = ui.mg.zone * 100 + '%'; $('mgZone').style.width = ui.mg.w * 100 + '%'; $('mgInfo').textContent = `${n.def.name} — ${n.calib}/${CFG.CALIBRATIONS} calibrated · Esc/E to cancel`; }
@@ -1389,6 +1413,51 @@ function simulate(dt) {
 requestAnimationFrame(frame);
 
 // =====================================================================
+// SAVE / LOAD — your spire (solo + host) persists in localStorage
+// =====================================================================
+const SAVE_KEY = 'canopy-spire-save-v1';
+const SAVE_TRIGGERS = new Set(['NODE_PROGRESS_UPDATE', 'NODE_RESTORED', 'PICKUP_TAKEN', 'REFUND']);
+game.ownsWorld = false; // true only for solo / hosting from your own save
+function readSave() {
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.v === 1 && s.nodes && typeof s.nodes === 'object' ? s : null; } catch (_) { return null; }
+}
+function saveGame() {
+  if (!game.playing || !game.ownsWorld) return;
+  const nodes = {}; for (const n of world.nodes.values()) nodes[n.id] = { cur: { ...n.cur }, calib: n.calib, restored: n.restored };
+  const p = player.lastSafe;
+  const data = { v: 1, savedAt: Date.now(), nodes, inventory: { ...game.inventory }, pos: [p.x, p.y, p.z].map(v => +v.toFixed(2)) };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch (_) { /* storage full / disabled: play on without saving */ }
+}
+let saveTimer = 0;
+function saveSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(saveGame, 600); }
+setInterval(saveGame, 10000);
+function loadSaveIntoWorld() {
+  game.ownsWorld = true;
+  const s = readSave(); if (!s) return false;
+  for (const d of NODE_DEFS) {
+    const ns = Object.hasOwn(s.nodes, d.id) ? s.nodes[d.id] : null; if (!ns || typeof ns !== 'object') continue;
+    world.setNodeProgress(d.id, ns.cur, ns.calib);
+    if (ns.restored === true) world.restoreNode(d.id, true);
+  }
+  const inv = safeRes(s.inventory, 999); for (const k of RES) game.inventory[k] = inv[k] || 0;
+  const pos = safeVec(s.pos);
+  if (pos) { const v = new V3(pos[0], pos[1] + 0.05, pos[2]); if (v.y > -1 && !phys.overlapAt(v)) player.spawn(v); }
+  return true;
+}
+{ const inner = game.apply; game.apply = m => { inner(m); if (isMsg(m) && SAVE_TRIGGERS.has(m.t)) saveSoon(); }; }
+function timeAgo(t) { const s = Math.max(0, (Date.now() - t) / 1000); return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; }
+function renderSaveInfo() {
+  const s = readSave();
+  if (!s) { $('saveInfo').innerHTML = '🌱 <b>New spire.</b> Progress saves automatically in this browser.'; return; }
+  const done = NODE_DEFS.filter(d => s.nodes[d.id] && s.nodes[d.id].restored === true).length;
+  const inv = safeRes(s.inventory, 999);
+  $('saveInfo').innerHTML = `💾 <b>Your spire: ${done}/${NODE_DEFS.length} restored</b> · saved ${timeAgo(Number(s.savedAt) || 0)}<br>` +
+    `Carrying ${RES.map(k => (inv[k] || 0) + RES_ICON[k]).join(' ')} · <i>Play Solo</i> and <i>Host Room</i> continue from here. ` +
+    '<button class="linkbtn" id="btnReset">Start over</button>';
+  $('btnReset').addEventListener('click', () => { if (confirm('Erase your saved spire and start fresh? This cannot be undone.')) { localStorage.removeItem(SAVE_KEY); renderSaveInfo(); } });
+}
+
+// =====================================================================
 // MENU / SESSION START
 // =====================================================================
 let saved = {}; try { saved = JSON.parse(localStorage.getItem('canopy-spire') || '{}') || {}; } catch (_) {}
@@ -1397,9 +1466,11 @@ let chosenColor = PLAYER_COLORS.includes(saved.color) ? saved.color : PLAYER_COL
 function renderSwatches() { $('swatches').innerHTML = PLAYER_COLORS.map(c => `<div class="sw${c === chosenColor ? ' sel' : ''}" data-c="${c}" style="background:${c}"></div>`).join(''); }
 renderSwatches();
 $('swatches').addEventListener('click', e => { if (PLAYER_COLORS.includes(e.target.dataset.c)) { chosenColor = e.target.dataset.c; renderSwatches(); } });
+renderSaveInfo();
 if (!window.Peer) { $('btnHost').disabled = $('btnJoin').disabled = true; $('menuStatus').textContent = 'PeerJS could not load — multiplayer unavailable, solo still works.'; }
 function setBusy(b) { for (const id of ['btnHost', 'btnJoin', 'btnSolo']) $(id).disabled = b || (id !== 'btnSolo' && !window.Peer); }
 function beginPlay() {
+  game.ownsWorld = false;
   game.selfName = safeName($('nameInput').value); game.selfColor = safeColor(chosenColor);
   localStorage.setItem('canopy-spire', JSON.stringify({ name: game.selfName, color: game.selfColor }));
   scene.remove(selfModel.group); const nm = makeCharacter(game.selfColor); Object.assign(selfModel, nm); scene.add(selfModel.group);
@@ -1413,10 +1484,10 @@ function enterGame() {
   chatLine('', '', 'Scan (Q) for broken nodes and resources. Restore all 7 to bring the Spire back to life.', true);
   lockPointer();
 }
-$('btnSolo').onclick = () => { beginPlay(); game.net.startSolo(); enterGame(); };
+$('btnSolo').onclick = () => { beginPlay(); loadSaveIntoWorld(); game.net.startSolo(); enterGame(); };
 $('btnHost').onclick = async () => {
   beginPlay(); setBusy(true); $('menuStatus').textContent = 'Opening room…';
-  try { const code = await game.net.host(); enterGame(); game.toast(`Room code: <b>${code}</b>`, true); }
+  try { const code = await game.net.host(); loadSaveIntoWorld(); game.net.initAuthority(true); enterGame(); game.toast(`Room code: <b>${code}</b>`, true); }
   catch (e) { $('menuStatus').textContent = 'Could not host: ' + (e.type || e.message); setBusy(false); }
 };
 $('btnJoin').onclick = async () => {
@@ -1429,4 +1500,4 @@ $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnJ
 const qs = new URLSearchParams(location.search);
 if (qs.get('room') && ROOM_RE.test(qs.get('room').toUpperCase())) $('codeInput').value = qs.get('room').toUpperCase();
 if (qs.has('solo')) $('btnSolo').click();
-game.cam = cam; game.simulate = simulate; game.keys = keys; game.pressed = pressed; window.__game = game; // debug handle (console tinkering / automated tests)
+game.cam = cam; game.simulate = simulate; game.saveGame = saveGame; game.keys = keys; game.pressed = pressed; window.__game = game; // debug handle (console tinkering / automated tests)

@@ -30,8 +30,16 @@
   #menuStatus{min-height:20px;margin-top:12px;font-size:14px;color:#a0522d}
   .controls{margin-top:14px;font-size:12.5px;color:#4a6a61;line-height:1.55;columns:2}
   .controls b{color:#21403a}
-  #resume{background:rgba(0,30,20,.35);font-size:26px;text-shadow:0 2px 6px #000;cursor:pointer;flex-direction:column;gap:6px}
-  #resume small{font-size:14px;opacity:.85}
+  #pause{background:rgba(0,30,20,.4)}
+  .pause-card{width:min(380px,92vw)}
+  .pause-card h2{margin:0 0 6px;color:#2e8b5e}
+  .pause-card button{display:block;width:100%;margin-top:10px}
+  #pauseInfo{font-size:14px;color:#4a6a61;line-height:1.5}
+  #pauseInfo b{color:#21403a}
+  #saveInfo{margin-top:14px;padding:10px 12px;border-radius:10px;background:#eef7f0;font-size:13.5px;color:#3b5d54;line-height:1.45}
+  #saveInfo b{color:#2e7d55}
+  .linkbtn{background:none;box-shadow:none;color:#b0503a;padding:0;font-size:13px;text-decoration:underline;font-weight:normal}
+  .linkbtn:active{transform:none;box-shadow:none}
   #hud{position:fixed;inset:0;pointer-events:none;z-index:10;text-shadow:0 1px 3px rgba(0,0,0,.7)}
   .panel{background:rgba(16,40,36,.55);border-radius:12px;padding:10px 12px;backdrop-filter:blur(3px)}
   #roomInfo{position:absolute;left:14px;top:14px;font-size:14px;min-width:170px}
@@ -119,6 +127,7 @@
     <input id="nameInput" maxlength="16" placeholder="Wanderer">
     <label>Colour</label>
     <div id="swatches"></div>
+    <div id="saveInfo"></div>
     <div class="row">
       <button id="btnHost">Host Room</button>
       <button id="btnSolo" class="alt2">Play Solo</button>
@@ -137,12 +146,25 @@
       <b>F</b> / <b>Right-click</b> grapple ring<br>
       <b>Q</b> scanner · <b>E</b> interact<br>
       <b>1/2/3</b> deliver · <b>R</b> calibrate<br>
-      <b>Enter</b> chat · <b>H</b> help
+      <b>Enter</b> chat · <b>H</b> help<br>
+      <b>Esc</b> game menu / leave
     </div>
   </div>
 </div>
 
-<div id="resume" class="overlay hidden">Click to resume<small>(mouse look needs pointer lock)</small></div>
+<div id="pause" class="overlay hidden">
+  <div class="card pause-card">
+    <h2>Game Menu</h2>
+    <div id="pauseInfo"></div>
+    <button id="btnResume">Resume</button>
+    <button id="btnInvite" class="alt">Copy invite link</button>
+    <button id="btnLeave" class="alt2">Leave to home screen</button>
+    <div class="controls">
+      <b>WASD</b> move · <b>Shift</b> sprint<br><b>Space</b> jump / glide<br>Walk into walls to <b>climb</b><br><b>X</b> let go · <b>F</b>/<b>RMB</b> grapple<br>
+      <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
+    </div>
+  </div>
+</div>
 
 <div id="hud" class="hidden">
   <div id="scanOverlay"></div>

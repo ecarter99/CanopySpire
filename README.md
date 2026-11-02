@@ -32,6 +32,13 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 | E | Inspect a node. In the panel: 1/2/3 deliver ⚡/🌱/⚙️, R = calibration minigame |
 | Enter | Chat (emoji quick-buttons) |
 | H | Help · mouse wheel = camera distance |
+| Esc | Game menu: resume, copy invite link, leave to home screen |
+
+## Saving
+Your spire saves automatically in this browser's localStorage: node progress, carried materials, and your last safe position. It saves every 10 s, after deliveries and restorations, when you open the menu, and when you leave or close the tab.
+- **Play Solo** and **Host Room** continue from your save, so friends who join see your restored spire and help you progress it.
+- **Joining** someone's room plays *their* spire. Your own save isn't touched, and your progress there is saved on the host's side.
+- The home screen shows your save, with a **Start over** link to erase it. Saves are per-browser: a different browser or device starts fresh.
 
 ## Loop
 Collect ⚡ energy cells, 🌱 bio-materials and ⚙️ scrap. They respawn after 45 s and are shared, so whoever grabs one first gets it. Deliver them to the 7 restoration nodes, then run 3 calibrations, which anyone can contribute to. Each restored node visibly changes its district and opens access:
