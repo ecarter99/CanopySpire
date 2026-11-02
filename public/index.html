@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Canopy Spire — Prototype</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fd7f5;font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;color:#fff;user-select:none}
+  canvas{display:block}
+  .hidden{display:none!important}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:30}
+  #menu{background:linear-gradient(180deg,rgba(30,90,110,.25),rgba(10,40,30,.55))}
+  .card{background:rgba(255,252,242,.95);color:#21403a;border-radius:20px;padding:26px 30px;width:min(460px,92vw);box-shadow:0 24px 70px rgba(0,0,0,.35)}
+  .card h1{margin:0;font-size:44px;color:#2e8b5e;letter-spacing:1px;text-shadow:0 2px 0 #c8f2d4}
+  .card .tag{margin:2px 0 18px;color:#5b7a70;font-style:italic}
+  .card label{display:block;font-weight:bold;font-size:13px;margin:10px 0 4px;color:#3b5d54;text-transform:uppercase;letter-spacing:.8px}
+  .card input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:2px solid #cfe3d8;font-size:16px;background:#fff;color:#21403a;outline:none}
+  .card input:focus{border-color:#45b37c}
+  #swatches{display:flex;gap:8px}
+  .sw{width:30px;height:30px;border-radius:50%;cursor:pointer;border:3px solid transparent;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+  .sw.sel{border-color:#21403a}
+  .row{display:flex;gap:10px;margin-top:14px}
+  .row input{flex:1;text-transform:uppercase;letter-spacing:4px;font-weight:bold}
+  button{cursor:pointer;border:0;border-radius:12px;padding:11px 18px;font-size:16px;font-weight:bold;color:#fff;background:#45b37c;box-shadow:0 4px 0 #2e7d55;font-family:inherit}
+  button:hover{filter:brightness(1.07)} button:active{transform:translateY(2px);box-shadow:0 2px 0 #2e7d55}
+  button.alt{background:#4aa3df;box-shadow:0 4px 0 #2c6f9e}
+  button.alt2{background:#f0a24a;box-shadow:0 4px 0 #b06c22}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .row button{flex:1}
+  #menuStatus{min-height:20px;margin-top:12px;font-size:14px;color:#a0522d}
+  .controls{margin-top:14px;font-size:12.5px;color:#4a6a61;line-height:1.55;columns:2}
+  .controls b{color:#21403a}
+  #resume{background:rgba(0,30,20,.35);font-size:26px;text-shadow:0 2px 6px #000;cursor:pointer;flex-direction:column;gap:6px}
+  #resume small{font-size:14px;opacity:.85}
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:10;text-shadow:0 1px 3px rgba(0,0,0,.7)}
+  .panel{background:rgba(16,40,36,.55);border-radius:12px;padding:10px 12px;backdrop-filter:blur(3px)}
+  #roomInfo{position:absolute;left:14px;top:14px;font-size:14px;min-width:170px}
+  #roomInfo .code{font-size:20px;font-weight:bold;letter-spacing:3px;color:#ffe082}
+  #roomInfo .pl{display:flex;align-items:center;gap:6px;margin-top:3px}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  #objectives{position:absolute;right:14px;top:14px;width:270px;font-size:13px}
+  #objectives h3{margin:0 0 6px;font-size:14px;letter-spacing:1px;color:#b9f6ca;text-transform:uppercase}
+  .tierh{margin:7px 0 2px;font-size:11px;color:#9ad;opacity:.9;text-transform:uppercase;letter-spacing:1px}
+  .obj{display:flex;align-items:center;gap:6px;margin:2px 0}
+  .obj .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .obj.done .nm{color:#b9f6ca}
+  .bar{height:6px;background:rgba(255,255,255,.18);border-radius:3px;overflow:hidden;width:70px}
+  .bar>i{display:block;height:100%;background:#7ee0a5}
+  #progressTotal{margin-top:8px;font-size:12px;color:#ffe082}
+  #inventory{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:10px}
+  .chip{background:rgba(16,40,36,.6);border-radius:20px;padding:7px 14px;font-size:17px;font-weight:bold;display:flex;gap:7px;align-items:center;transition:transform .15s}
+  .chip.bump{transform:scale(1.25)}
+  #stamina{position:absolute;width:56px;height:56px;transform:translate(-50%,-50%);transition:opacity .4s}
+  #crosshair{position:absolute;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:rgba(255,255,255,.8);box-shadow:0 0 3px #000}
+  #crosshair.lock{width:28px;height:28px;margin:-14px 0 0 -14px;background:transparent;border:3px solid #ffca28;box-shadow:0 0 8px #ffca28}
+  #crosshair.lock::after{content:"F / RMB";position:absolute;top:30px;left:50%;transform:translateX(-50%);font-size:11px;color:#ffe082;white-space:nowrap;font-weight:bold}
+  #prompt{position:absolute;left:50%;bottom:80px;transform:translateX(-50%);font-size:17px;padding:7px 16px}
+  .key{display:inline-block;min-width:18px;padding:1px 6px;margin-right:4px;border-radius:5px;background:#fff;color:#21403a;font-weight:bold;text-shadow:none;text-align:center;font-size:13px}
+  #nodePanel{position:absolute;right:300px;top:50%;transform:translateY(-50%);width:330px;padding:16px;font-size:14px}
+  .np-title{font-size:20px;font-weight:bold;color:var(--c)}
+  .np-sub{font-size:12px;opacity:.75;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
+  .np-desc{font-size:13px;opacity:.9;margin-bottom:10px;font-style:italic}
+  .np-res{margin:7px 0}
+  .np-res .bar{width:100%;height:9px;margin-top:3px}
+  .np-stage{margin-top:12px;padding-top:8px;border-top:1px solid rgba(255,255,255,.2)}
+  .np-done{font-size:18px;color:#b9f6ca;font-weight:bold;margin:10px 0}
+  .np-foot{margin-top:10px;font-size:12px;opacity:.8}
+  #minigame{position:absolute;left:50%;top:62%;transform:translateX(-50%);width:420px;padding:14px 16px;text-align:center}
+  #mgTrack{position:relative;height:26px;background:rgba(255,255,255,.15);border-radius:13px;margin:10px 0;overflow:hidden}
+  #mgZone{position:absolute;top:0;bottom:0;background:rgba(120,240,160,.75)}
+  #mgMarker{position:absolute;top:-2px;bottom:-2px;width:6px;margin-left:-3px;background:#fff;border-radius:3px;box-shadow:0 0 6px #fff}
+  #minigame.miss #mgTrack{background:rgba(255,80,80,.5)}
+  #chat{position:absolute;left:14px;bottom:18px;width:340px;pointer-events:auto}
+  #chatLog{max-height:190px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;font-size:14px;gap:2px}
+  #chatLog div{background:rgba(16,40,36,.45);padding:3px 8px;border-radius:8px;transition:opacity 1s;word-wrap:break-word}
+  #chatLog div.old{opacity:0}
+  #chat.open #chatLog div.old{opacity:1}
+  #chatInputRow{margin-top:6px}
+  #chatInput{width:100%;box-sizing:border-box;padding:8px 10px;border-radius:10px;border:0;font-size:14px;background:rgba(255,255,255,.92);color:#21403a;outline:none}
+  #emojis{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap}
+  #emojis span{cursor:pointer;font-size:20px;background:rgba(255,255,255,.2);border-radius:8px;padding:2px 5px}
+  #emojis span:hover{background:rgba(255,255,255,.45)}
+  #chatHint{font-size:12px;opacity:.7;margin-top:4px}
+  #toasts{position:absolute;left:50%;top:70px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px}
+  .toast{padding:7px 16px;border-radius:20px;background:rgba(16,40,36,.65);font-size:15px;animation:tin .3s ease-out;transition:opacity .6s}
+  .toast.big{font-size:24px;font-weight:bold;padding:12px 26px;background:linear-gradient(90deg,rgba(46,139,94,.85),rgba(74,163,223,.85))}
+  @keyframes tin{from{transform:translateY(-12px);opacity:0}}
+  #region{position:absolute;left:50%;top:28%;transform:translateX(-50%);text-align:center;font-size:40px;font-weight:bold;letter-spacing:3px;opacity:0;transition:opacity 1.2s;text-shadow:0 2px 10px rgba(0,0,0,.6)}
+  #region small{display:block;font-size:15px;letter-spacing:2px;font-weight:normal;opacity:.9}
+  #region.show{opacity:1}
+  #labels{position:absolute;inset:0;overflow:hidden}
+  .lbl{position:absolute;transform:translate(-50%,-100%);white-space:nowrap;font-size:12px;text-align:center;pointer-events:none}
+  .lbl.node{background:rgba(0,40,50,.7);border:1px solid var(--c);border-radius:8px;padding:3px 8px;font-size:12.5px}
+  .lbl.node b{color:var(--c)}
+  .lbl.pick{font-size:16px}
+  .lbl.therm{color:#ffe0b2;font-weight:bold}
+  .lbl.anch{color:#ffe082}
+  .lbl.name{font-weight:bold;font-size:14px;background:rgba(0,0,0,.35);padding:1px 8px;border-radius:8px}
+  #scanOverlay{position:absolute;inset:0;opacity:0;transition:opacity .35s;background:radial-gradient(ellipse at center,rgba(0,255,220,0) 45%,rgba(0,200,200,.28) 100%),repeating-linear-gradient(0deg,rgba(0,255,230,.05) 0 2px,transparent 2px 5px)}
+  body.scanning #scanOverlay{opacity:1}
+  #scanTag{position:absolute;left:50%;top:14px;transform:translateX(-50%);font-weight:bold;letter-spacing:3px;color:#7ff;opacity:0;transition:opacity .3s}
+  body.scanning #scanTag{opacity:1}
+  #help{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:13px;line-height:1.6;width:240px}
+  #stateTag{position:absolute;right:14px;bottom:14px;font-size:11px;opacity:.6}
+  #netWarn{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);color:#ffcc80}
+</style>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<!-- Dependencies are vendored (see vendor/) — no third-party script hosts at runtime -->
+<script src="vendor/peerjs.min.js"></script>
+</head>
+<body>
+
+<div id="menu" class="overlay">
+  <div class="card">
+    <h1>Canopy Spire</h1>
+    <div class="tag">Restore the vertical city — together.</div>
+    <label>Your name</label>
+    <input id="nameInput" maxlength="16" placeholder="Wanderer">
+    <label>Colour</label>
+    <div id="swatches"></div>
+    <div class="row">
+      <button id="btnHost">Host Room</button>
+      <button id="btnSolo" class="alt2">Play Solo</button>
+    </div>
+    <div class="row">
+      <input id="codeInput" maxlength="5" placeholder="CODE">
+      <button id="btnJoin" class="alt">Join Room</button>
+    </div>
+    <div id="menuStatus"></div>
+    <div class="controls">
+      <b>WASD</b> move · <b>Shift</b> sprint<br>
+      <b>Space</b> jump / glide (in air)<br>
+      Walk into walls to <b>climb</b><br>
+      <b>Space</b> on wall: leap off (+W: dash up)<br>
+      <b>X</b> let go of wall<br>
+      <b>F</b> / <b>Right-click</b> grapple ring<br>
+      <b>Q</b> scanner · <b>E</b> interact<br>
+      <b>1/2/3</b> deliver · <b>R</b> calibrate<br>
+      <b>Enter</b> chat · <b>H</b> help
+    </div>
+  </div>
+</div>
+
+<div id="resume" class="overlay hidden">Click to resume<small>(mouse look needs pointer lock)</small></div>
+
+<div id="hud" class="hidden">
+  <div id="scanOverlay"></div>
+  <div id="labels"></div>
+  <div id="scanTag">◈ SCANNER ACTIVE ◈</div>
+  <div id="roomInfo" class="panel"></div>
+  <div id="objectives" class="panel"></div>
+  <div id="region"></div>
+  <svg id="stamina" viewBox="0 0 56 56">
+    <circle cx="28" cy="28" r="22" fill="rgba(0,0,0,.25)" stroke="rgba(255,255,255,.25)" stroke-width="6"/>
+    <circle id="stamArc" cx="28" cy="28" r="22" fill="none" stroke="#7CFC9A" stroke-width="6" stroke-linecap="round" transform="rotate(-90 28 28)"/>
+  </svg>
+  <div id="crosshair"></div>
+  <div id="prompt" class="panel hidden"></div>
+  <div id="nodePanel" class="panel hidden"></div>
+  <div id="minigame" class="panel hidden">
+    <div><b>CALIBRATION</b> — press <span class="key">Space</span> when the marker is in the green band</div>
+    <div id="mgTrack"><div id="mgZone"></div><div id="mgMarker"></div></div>
+    <div id="mgInfo" style="font-size:12px;opacity:.85"></div>
+  </div>
+  <div id="inventory"></div>
+  <div id="chat">
+    <div id="chatLog"></div>
+    <div id="chatInputRow" class="hidden">
+      <input id="chatInput" maxlength="160" placeholder="Say something… (Enter to send, Esc to cancel)">
+      <div id="emojis"></div>
+    </div>
+    <div id="chatHint"><span class="key">Enter</span> chat</div>
+  </div>
+  <div id="toasts"></div>
+  <div id="help" class="panel hidden"></div>
+  <div id="netWarn"></div>
+  <div id="stateTag"></div>
+</div>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>
