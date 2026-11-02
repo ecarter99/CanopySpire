@@ -81,7 +81,7 @@ const ZIPLINES = [ // sky-lines always run downhill from a to b
   { id: 'Z4', a: [-13.5, 81, 13.5], b: [-76, 7.5, 76], needs: 'apex_turbines' },
 ];
 const BOUNCE_PADS = [ // [x, y, z, tier that must have a restored node (null = always)]
-  [14, 0, 50, null], [-24, 0, 44, 0], [40, 0, 28, 0], [-20, 0, -45, 0], [-4, 36, -22, 1], [20, 36, 16, 1], [0, 78, -12.5, 2],
+  [14, 0, 50, null], [-24, 0, 44, 0], [40, 0, 28, 0], [-20, 0, -45, 0], [-4, 36, -22, 1], [20, 36, 16, 1], [0, 78, -12.5, 2], [2016, 102, 9, null],
 ];
 const RELICS = [
   { id: 'r1', p: [14, 8.6, 50], hint: 'Floating high above a bounce bloom by the south path' },
@@ -103,12 +103,24 @@ const COURSES = [
   { id: 'spiral', name: 'Thermal Spiral', color: 0xff7043, needs: 'basal_conduit', face: 'up',
     rings: [0, 1, 2, 3, 4].map(i => [-48 + Math.cos(i * Math.PI / 2) * 3, 6 + i * 10, 8 + Math.sin(i * Math.PI / 2) * 3]) },
 ];
+const PLAZAS = { chimes: [-70, 0, 30], vault: [57, 0, -38], portals: [30, 0, -80] };
+const KEEPERS = [
+  { id: 'mossa', name: 'Keeper Mossa', pos: [-8, 0, 60], face: Math.PI / 2, look: { o: 3, a: 1, s: 4, h: 5, hat: 3, g: 3 } },
+  { id: 'brindle', name: 'Keeper Brindle', pos: [54, 0, -30], face: Math.PI, look: { o: 5, a: 7, s: 2, h: 4, hat: 6, g: 0 } },
+  { id: 'aster', name: 'Keeper Aster', pos: [22, 0, -70], face: 0, look: { o: 4, a: 5, s: 1, h: 6, hat: 4, g: 4 } },
+];
+const REALMS = {
+  sky: { c: [2000, 100, 0], spawn: [2000, 100.6, 35], name: 'Sky Archipelago', sub: 'Trial of Winds' },
+  grotto: { c: [-2000, 0, 0], spawn: [-2000, 0.6, 23], name: 'Crystal Grotto', sub: 'Trial of Light' },
+};
 const FEATURE_RESERVED = (() => { // keep houses & trees out of zipline corridors, pads and ring courses
   const r = [];
   for (const z of ZIPLINES) for (let t = 0.4; t <= 1.0001; t += 0.08) r.push([lerp(z.a[0], z.b[0], t), lerp(z.a[2], z.b[2], t), 6]);
   for (const p of BOUNCE_PADS) if (p[1] === 0) r.push([p[0], p[2], 3.5]);
   for (const q of COURSES[0].rings.slice(2)) r.push([q[0], q[2], 7]);
   r.push([-106, 0, 4]);
+  for (const p of Object.values(PLAZAS)) r.push([p[0], p[2], 14]);
+  for (const k of KEEPERS) r.push([k.pos[0], k.pos[2], 3]);
   return r;
 })();
 const isMsg = m => m !== null && typeof m === 'object' && !Array.isArray(m) && typeof m.t === 'string';
@@ -188,7 +200,7 @@ function toon(hex, opts = {}) {
   if (!opts.unique) matCache.set(key, m);
   return m;
 }
-const tierMats = [[], [], []];
+const tierMats = [[], [], [], []]; // index 3 = portal realms (always vibrant)
 function tmat(tier, hex, tex) {
   const key = 't' + tier + ':' + hex + ':' + (tex ? tex.uuid : '');
   if (matCache.has(key)) return matCache.get(key);
@@ -196,7 +208,7 @@ function tmat(tier, hex, tex) {
   const dull = new THREE.Color().setHSL(hsl.h, hsl.s * 0.16, hsl.l * 0.72 + 0.1, THREE.SRGBColorSpace);
   const m = new THREE.MeshToonMaterial({ color: dull.clone(), gradientMap: GRAD, map: tex || null });
   m.userData.vib = vib; m.userData.dull = dull;
-  tierMats[tier].push(m); matCache.set(key, m);
+  if (tier >= 3) m.color.copy(vib); tierMats[tier].push(m); matCache.set(key, m);
   return m;
 }
 const PAL = {
@@ -244,14 +256,14 @@ const WATER_TEX = waterTexture();
 const DOT_TEX = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.65)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
 // Shared animated uniforms: grass wind + height, flower "bloom" growth per tier.
 const GRASS_U = { time: { value: 0 }, vib: [{ value: 0.12 }, { value: 0.12 }, { value: 0.12 }] };
-const BLOOM_U = [{ value: 0 }, { value: 0 }, { value: 0 }];
+const BLOOM_U = [{ value: 0 }, { value: 0 }, { value: 0 }, { value: 1 }];
 function grassMat(tier, hex) {
   const vib = new THREE.Color(hex), hsl = {}; vib.getHSL(hsl, THREE.SRGBColorSpace);
   const dull = new THREE.Color().setHSL(hsl.h * 0.6 + 0.03, hsl.s * 0.35, hsl.l * 0.78 + 0.08, THREE.SRGBColorSpace);
-  const m = new THREE.MeshToonMaterial({ color: dull.clone(), gradientMap: GRAD, side: THREE.DoubleSide });
-  m.userData.vib = vib; m.userData.dull = dull; tierMats[tier].push(m); noOutline(m);
+  const m = new THREE.MeshToonMaterial({ color: tier < 0 ? vib.clone() : dull.clone(), gradientMap: GRAD, side: THREE.DoubleSide });
+  m.userData.vib = vib; m.userData.dull = dull; if (tier >= 0) tierMats[tier].push(m); noOutline(m);
   m.onBeforeCompile = sh => {
-    sh.uniforms.uTime = GRASS_U.time; sh.uniforms.uVib = GRASS_U.vib[tier];
+    sh.uniforms.uTime = GRASS_U.time; sh.uniforms.uVib = tier < 0 ? { value: 1 } : GRASS_U.vib[tier];
     sh.vertexShader = 'uniform float uTime; uniform float uVib; varying float vH;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       vH = position.y;
       transformed.y *= mix(0.45, 1.0, uVib);
@@ -378,8 +390,8 @@ const LOOK_OPTS = {
   accent: ['#ffffff', '#ffe066', '#ff8787', '#74c0fc', '#8ce99a', '#e599f7', '#ffa94d', '#343a40'],
   skin: ['#ffe3cc', '#f6cba8', '#e2ac84', '#c68863', '#8d5a3b', '#5c3a24'],
   hair: ['#2b1d14', '#5a3825', '#a0522d', '#e8c872', '#d9480f', '#f1f3f5', '#7048e8', '#2f9e44'],
-  hat: ['None', 'Straw hat', 'Cap', 'Flower crown', 'Hood', 'Beanie', 'Goggles', 'Leaf crown', 'Sprout'],
-  glider: ['#ff7043', '#4dabf7', '#ffd43b', '#69db7c', '#da77f2', '#f8f9fa', '#e64980', '#343a40', 'rainbow', 'gold'],
+  hat: ['None', 'Straw hat', 'Cap', 'Flower crown', 'Hood', 'Beanie', 'Goggles', 'Leaf crown', 'Sprout', 'Keeper circlet'],
+  glider: ['#ff7043', '#4dabf7', '#ffd43b', '#69db7c', '#da77f2', '#f8f9fa', '#e64980', '#343a40', 'rainbow', 'gold', 'starlight'],
 };
 const LOOK_KEYS = [['o', 'outfit', 'Outfit'], ['a', 'accent', 'Accent'], ['s', 'skin', 'Skin'], ['h', 'hair', 'Hair'], ['hat', 'hat', 'Hat'], ['g', 'glider', 'Glider']];
 const DEFAULT_LOOK = { o: 0, a: 0, s: 1, h: 1, hat: 1, g: 0 };
@@ -443,6 +455,9 @@ function makeCharacter(lookIn) {
   } else if (hat === 'Sprout') {
     add(new THREE.CylinderGeometry(0.018, 0.022, 0.22, 6), toon(PAL.leaf3), 0, 1.98, 0);
     for (const s of [-1, 1]) add(ICO1, toon(PAL.leaf2), s * 0.09, 2.09, 0, root, 0, 0, s * 0.5).scale.set(0.1, 0.03, 0.06);
+  } else if (hat === 'Keeper circlet') {
+    add(new THREE.TorusGeometry(0.255, 0.035, 8, 28), toon(0xffcf40, { emissive: 0x8a6000, emissiveIntensity: 0.3 }), 0, 1.76, 0, root, Math.PI / 2 - 0.2);
+    add(facet(new THREE.OctahedronGeometry(0.07)), toon(0x9be7ff, { emissive: 0x4dd0e1, emissiveIntensity: 0.8 }), 0, 1.79, 0.26);
   } else if (hat === 'Goggles') {
     add(new THREE.TorusGeometry(0.265, 0.03, 6, 24), mDark, 0, 1.76, 0, g, Math.PI / 2 - 0.25);
     for (const s of [-1, 1]) { add(new THREE.CylinderGeometry(0.075, 0.075, 0.07, 16), toon(PAL.brass), s * 0.1, 1.82, 0.22, g, Math.PI / 2 - 0.4); add(new THREE.CircleGeometry(0.058, 16), toon(0x7fe0e8, { emissive: 0x2aa8b8, emissiveIntensity: 0.3 }), s * 0.1, 1.835, 0.255, g, -0.4); }
@@ -465,6 +480,7 @@ function makeCharacter(lookIn) {
   const canopy = new THREE.CylinderGeometry(1.35, 1.35, 1.0, 28, 1, true, -1.0, 2.0); canopy.rotateX(-Math.PI / 2); canopy.translate(0, 1.0, 0);
   let canopyMat;
   if (gv === 'rainbow') { const pos = canopy.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color(); for (let i = 0; i < pos.count; i++) { c.setHSL(((pos.getX(i) / 1.35) + 1) / 2 * 0.8, 0.85, 0.6, THREE.SRGBColorSpace); col.set([c.r, c.g, c.b], i * 3); } canopy.setAttribute('color', new THREE.BufferAttribute(col, 3)); canopyMat = toon(0xffffff, { side: THREE.DoubleSide, vertexColors: true }); }
+  else if (gv === 'starlight') canopyMat = toon(0x26346e, { side: THREE.DoubleSide, emissive: 0x5b6fe0, emissiveIntensity: 0.45 });
   else if (gv === 'gold') canopyMat = toon(0xffcf40, { side: THREE.DoubleSide, emissive: 0x8a6000, emissiveIntensity: 0.35 });
   else canopyMat = toon(new THREE.Color(gv).getHex(), { side: THREE.DoubleSide });
   add(canopy, canopyMat, 0, 0, 0, glider);
@@ -506,7 +522,7 @@ class World {
     this.nodes = new Map(); this.thermals = {}; this.anchors = []; this.pickups = []; this.waterfalls = {};
     this.tweens = []; this.bursts = []; this.updaters = [];
     this.vib = [0.12, 0.12, 0.12]; this.vibTarget = [0.12, 0.12, 0.12]; this.vibDirty = true;
-    this.plants = [[], [], []]; this.flowerSpots = []; this.bloomGeos = [[], [], []]; this.statics = new Map(); this.grassMeshes = [];
+    this.plants = [[], [], []]; this.flowerSpots = []; this.bloomGeos = [[], [], [], []]; this.statics = new Map(); this.grassMeshes = [];
     this.time = 0; this.scanning = false; this.turbineSpeed = 0.15; this.turbineTarget = 0.15; this.rotors = [];
     this.onAllRestored = null;
     this.solarMat = toon(0x3a4256, { emissive: 0x1e5bd8, emissiveIntensity: 0, unique: true });
@@ -542,7 +558,7 @@ class World {
       for (const g of b.geos) g.dispose();
     }
     this.statics.clear();
-    for (let t = 0; t < 3; t++) {
+    for (let t = 0; t < this.bloomGeos.length; t++) {
       if (!this.bloomGeos[t].length) continue;
       const m = new THREE.Mesh(mergeGeometries(this.bloomGeos[t], false), bloomMat(t)); m.receiveShadow = true; m.frustumCulled = false; this.scene.add(m);
       this.bloomGeos[t] = [];
@@ -853,6 +869,7 @@ class World {
       for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) M[j * N + i] = 0;
     };
     carve(-3.5, 11.5, 3.5, 110); carve(-110, -2.3, -11.5, 2.3); carve(11.5, -2.3, 110, 2.3);
+    for (const p of Object.values(PLAZAS)) carve(p[0] - 12, p[2] - 12, p[0] + 12, p[2] + 12);
     for (const b of low) carve(b.min.x - 0.15, b.min.z - 0.15, b.max.x + 0.15, b.max.z + 0.15);
     const tex = new THREE.DataTexture(M, N, N, THREE.RedFormat, THREE.UnsignedByteType); tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.needsUpdate = true; return tex;
   }
@@ -864,7 +881,7 @@ class World {
   build() {
     const r = this.rng, S = this.scene;
     // Sea & island
-    const sea = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), toon(0x3fa9d6, { noOutline: true })); sea.rotation.x = -Math.PI / 2; sea.position.y = -4; sea.receiveShadow = true; S.add(sea);
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000), toon(0x3fa9d6, { noOutline: true })); sea.rotation.x = -Math.PI / 2; sea.position.y = -4; sea.receiveShadow = true; S.add(sea);
     const shore = new THREE.Mesh(new THREE.RingGeometry(150, 175, 64), noOutline(new THREE.MeshBasicMaterial({ color: 0xbfe8f5, transparent: true, opacity: 0.45, depthWrite: false }))); shore.rotation.x = -Math.PI / 2; shore.position.y = -3.95; S.add(shore);
     this.block(-110, -9, -110, 110, 0, 110, tmat(0, PAL.grass, TEX.grass), { cast: false, r: 0.9 });
     this.block(-113, -9, -113, 113, -1.4, 113, tmat(0, PAL.sand, TEX.plaster), { collide: false, cast: false, r: 1.2 });
@@ -1358,7 +1375,7 @@ class PlayerController {
       if (this.groundTime >= CFG.REGEN_DELAY) { this.stamina = Math.min(CFG.STAMINA_MAX, this.stamina + CFG.REGEN_RATE * dt); if (this.stamina >= CFG.STAMINA_MAX) this.exhausted = false; }
       this.safeT += dt; if (this.safeT > 0.5) { this.safeT = 0; this.lastSafe.copy(this.pos); }
     } else this.groundTime = 0;
-    if (this.pos.y < -3.5) { this.pos.copy(this.lastSafe); this.pos.y += 0.3; this.vel.set(0, 0, 0); this.state = 'FALL'; this.grapple = null; this.zip = null; this.events.push('respawn'); }
+    if (this.pos.y < (this.killY ? this.killY() : -3.5)) { this.pos.copy(this.lastSafe); this.pos.y += 0.3; this.vel.set(0, 0, 0); this.state = 'FALL'; this.grapple = null; this.zip = null; this.events.push('respawn'); }
   }
   updMove(dt, inp, mx, mz, mlen) {
     const speed = inp.sprint ? CFG.RUN : CFG.WALK;
@@ -1452,6 +1469,9 @@ class NetworkManager {
     }
     if (fromWorld) for (const p of this.game.world.pickups) if (!p.available) this.scheduleRespawn(p.id, true);
     this.auth.players.set(this.selfId, this.selfInfo());
+    this.auth.puzzles = JSON.parse(JSON.stringify(this.game.puzzles)); delete this.auth.puzzles.chimes.hit;
+    if (!['idle', 'done'].includes(this.auth.puzzles.chimes.phase)) this.auth.puzzles.chimes.phase = this.auth.puzzles.chimes.solved ? 'done' : 'idle';
+    for (const st of this.auth.puzzles.plates.stones) if (st.c && st.c !== this.selfId) st.c = null;
   }
   selfInfo() { const pl = this.game.player; return { id: this.selfId, name: this.game.selfName, color: this.game.selfColor, look: this.game.selfLook, p: [pl.pos.x, pl.pos.y, pl.pos.z], r: pl.yaw, s: pl.state }; }
   genCode() { const A = ROOM_ALPHABET; let s = ''; const rnd = crypto.getRandomValues(new Uint32Array(5)); for (let i = 0; i < 5; i++) s += A[rnd[i] % A.length]; return s; }
@@ -1525,8 +1545,8 @@ class NetworkManager {
     conn.on('close', () => this.dropPeer(conn.peer));
     conn.on('error', () => this.dropPeer(conn.peer));
   }
-  dropPeer(id) { if (!this.conns.has(id)) return; this.conns.delete(id); this.auth.players.delete(id); this.broadcast({ t: 'PLAYER_LEAVE', id }); }
-  snapshot() { return { nodes: this.auth.nodes, taken: [...this.auth.taken] }; }
+  dropPeer(id) { if (!this.conns.has(id)) return; this.conns.delete(id); puzzleDropCarrier(this, id); this.auth.players.delete(id); this.broadcast({ t: 'PLAYER_LEAVE', id }); }
+  snapshot() { return { nodes: this.auth.nodes, taken: [...this.auth.taken], puzzles: this.auth.puzzles }; }
   // local intent → authority
   send(m) { if (this.mode === 'client') { if (this.hostConn && this.hostConn.open) this.hostConn.send(m); } else this.hostHandle(this.selfId, m); }
   sendTo(id, m) { if (id === this.selfId) this.game.apply(m); else { const c = this.conns.get(id); if (c && c.open) c.send(m); } }
@@ -1547,6 +1567,7 @@ class NetworkManager {
         const pl = A.players.get(from); if (pl) { pl.p = p; pl.r = r; pl.s = s; }
         this.broadcast({ t: 'PLAYER_MOVE', id: from, p, r, s, e }, from); break;
       }
+      case 'PUZZLE': puzzleHost(this, from, m); break;
       case 'PING': {
         const p = safeVec(m.p), now = performance.now(); if (!p) break;
         A.pingT = A.pingT || new Map(); if (now - (A.pingT.get(from) || 0) < 700) break; A.pingT.set(from, now);
@@ -1704,11 +1725,12 @@ function renderNodePanel() {
   h += '<div class="np-foot"><span class="key">E</span> Close</div>';
   $('nodePanel').innerHTML = h; $('nodePanel').classList.remove('hidden');
 }
+function showRegionText(name, sub) { $('region').innerHTML = `${esc(name)}<small>${esc(sub)}</small>`; $('region').classList.add('show'); clearTimeout(ui.regionTimer); ui.regionTimer = setTimeout(() => $('region').classList.remove('show'), 3500); }
 function showRegion(t) {
   $('region').innerHTML = `${TIER_NAMES[t]}<small>${TIER_SUB[t]}</small>`; $('region').classList.add('show');
   clearTimeout(ui.regionTimer); ui.regionTimer = setTimeout(() => $('region').classList.remove('show'), 3000);
 }
-$('help').innerHTML = `<b>Controls</b><br><span class="key">WASD</span> move  <span class="key">Shift</span> sprint<br><span class="key">Space</span> jump · again in air = glider<br>Walk into a wall to <b>climb</b> (uses stamina)<br>On wall: <span class="key">Space</span> leap off, <span class="key">W</span>+<span class="key">Space</span> dash up, <span class="key">X</span> let go<br><span class="key">F</span>/<span class="key">RMB</span> grapple to a gold ring<br><span class="key">Q</span> scanner (nodes, resources, thermals)<br><span class="key">E</span> inspect node · <span class="key">1</span><span class="key">2</span><span class="key">3</span> deliver · <span class="key">R</span> calibrate<br><span class="key">T</span> track next node · <span class="key">G</span>/<span class="key">MMB</span> ping<br><span class="key">B</span> then <span class="key">1</span>–<span class="key">4</span> emote · <span class="key">E</span> ride sky-lines<br><span class="key">Enter</span> chat · <span class="key">H</span> toggle help<br><span class="key">Esc</span> game menu (resume / leave)<br><br><i>Glide into rising thermals to gain height. Restore nodes to bring water, light and greenery back — and to open new routes for everyone.</i>`;
+$('help').innerHTML = `<b>Controls</b><br><span class="key">WASD</span> move  <span class="key">Shift</span> sprint<br><span class="key">Space</span> jump · again in air = glider<br>Walk into a wall to <b>climb</b> (uses stamina)<br>On wall: <span class="key">Space</span> leap off, <span class="key">W</span>+<span class="key">Space</span> dash up, <span class="key">X</span> let go<br><span class="key">F</span>/<span class="key">RMB</span> grapple to a gold ring<br><span class="key">Q</span> scanner (nodes, resources, thermals)<br><span class="key">E</span> inspect node · <span class="key">1</span><span class="key">2</span><span class="key">3</span> deliver · <span class="key">R</span> calibrate<br><span class="key">T</span> track next node · <span class="key">G</span>/<span class="key">MMB</span> ping<br><span class="key">B</span> then <span class="key">1</span>–<span class="key">4</span> emote · <span class="key">E</span> ride sky-lines<br><span class="key">J</span> quest log · talk to the Keepers (E)<br><span class="key">Enter</span> chat · <span class="key">H</span> toggle help<br><span class="key">Esc</span> game menu (resume / leave)<br><br><i>Glide into rising thermals to gain height. Restore nodes to bring water, light and greenery back — and to open new routes for everyone.</i>`;
 const EMOJIS = ['👋', '👍', '🙌', '🎉', '❓', '⚡', '🌱', '⚙️', '💧', '🌉', '🪂', '❤️'];
 $('emojis').innerHTML = EMOJIS.map(e => `<span>${e}</span>`).join('');
 $('emojis').addEventListener('mousedown', e => { if (e.target.tagName === 'SPAN') { e.preventDefault(); game.net.send({ t: 'CHAT', text: e.target.textContent }); } });
@@ -1776,6 +1798,7 @@ game.apply = m => {
       const id = safeId(m.id); if (!id) break; game.net.selfId = id; game.tod = safeNum(m.tod, 0, 0.9999, game.tod);
       const wn = (m.world && m.world.nodes) || {};
       for (const d of NODE_DEFS) { const s = Object.hasOwn(wn, d.id) ? wn[d.id] : null; if (!s) continue; world.setNodeProgress(d.id, s.cur, s.calib); if (s.restored === true) world.restoreNode(d.id, true); }
+      if (m.world && m.world.puzzles && typeof m.world.puzzles === 'object') applyPuzzleAll(m.world.puzzles);
       for (const pid of Array.isArray(m.world && m.world.taken) ? m.world.taken : []) if (game.validPid(pid)) world.setPickupAvailable(pid, false);
       for (const p of Array.isArray(m.players) ? m.players.slice(0, CFG.MAX_PLAYERS) : []) if (p && p.id !== id) game.addRemote(p.id, p.name, p.color, p.p, p.r, p.s, p.look);
       renderObjectives(); break;
@@ -1808,6 +1831,7 @@ game.apply = m => {
       if (m.by === game.net.selfId && wasAvail) { const p = world.pickups[m.pid]; game.inventory[p.type]++; sfx.play('pickup', p.type); renderInventory(p.type); if (ui.panelNode) renderNodePanel(); }
       break;
     }
+    case 'PUZZLE_STATE': if (typeof m.id === 'string') applyPuzzleState(m.id, m.s); break;
     case 'PICKUP_RESPAWN': if (game.validPid(m.pid)) world.setPickupAvailable(m.pid, true); break;
     case 'REFUND': { const res = safeRes(m.res); for (const k of RES) game.inventory[k] += res[k] || 0; renderInventory(); if (ui.panelNode) renderNodePanel(); break; }
     case 'CHAT': { const text = safeText(m.text); if (text) { chatLine(safeName(m.name), safeColor(m.color), text); sfx.play('chat'); } break; }
@@ -1879,7 +1903,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) saveG
 
 function readInput() {
   const k = c => keys.has(c), p = c => pressed.has(c);
-  const busy = !!ui.mg;
+  const busy = !!ui.mg || dlg.open;
   const inp = {
     f: busy ? 0 : (k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0),
     r: busy ? 0 : (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0),
@@ -1929,8 +1953,9 @@ function updateInteraction() {
   if (!ui.mg) {
     if (pressed.has('KeyE')) {
       if (ui.panelNode) { ui.panelNode = null; renderNodePanel(); }
-      else if (near) { ui.panelNode = near.id; renderNodePanel(); }
-      else { const z = nearestZip(); if (z) { if (z.active) player.startZip(z); else game.toast('This sky-line is dormant — restore the Crown Wind Turbines to power it.'); } }
+      else if (myStone()) dropStone();
+      else if (near && !(nearestInteract() || {}).prio) { ui.panelNode = near.id; renderNodePanel(); }
+      else { const it = nearestInteract(); if (it) it.act(); }
     }
     if (ui.panelNode) {
       if (pressed.has('Digit1')) deliver('energy'); if (pressed.has('Digit2')) deliver('bio'); if (pressed.has('Digit3')) deliver('scrap');
@@ -1940,7 +1965,7 @@ function updateInteraction() {
   }
   const pr = $('prompt');
   if (!ui.panelNode && near) { pr.innerHTML = near.restored ? `${TYPE_ICON[near.def.type]} ${near.def.name} — <b style="color:#b9f6ca">Restored</b>` : `<span class="key">E</span> Inspect ${near.def.name}`; pr.classList.remove('hidden'); }
-  else { const z = !ui.panelNode && player.state !== 'ZIP' && nearestZip(); if (z) { pr.innerHTML = z.active ? '<span class="key">E</span> Ride the sky-line 🚡' : '🚡 Sky-line dormant — restore the Crown Wind Turbines'; pr.classList.remove('hidden'); } else pr.classList.add('hidden'); }
+  else { const it = !ui.panelNode && !dlg.open && (myStone() ? { label: () => '<span class="key">E</span> Set down the seed-stone' } : nearestInteract()); if (it) { pr.innerHTML = it.label(); pr.classList.remove('hidden'); } else pr.classList.add('hidden'); }
   // pickups
   const c = player.pos.clone(); c.y += 0.9;
   for (const p of world.pickups) if (p.available && !p.pending && p.pos.distanceToSquared(c) < 2.4 * 2.4) { p.pending = true; p.mesh.visible = false; game.net.send({ t: 'PICKUP_TAKE', pid: p.id }); }
@@ -1994,7 +2019,7 @@ function updateHUD() {
   st.style.opacity = (f < 0.999 || player.state === 'CLIMB' || player.state === 'GLIDE') ? 1 : 0;
   // region banner
   const t = player.pos.y > 74 ? 2 : player.pos.y > 30 ? 1 : 0;
-  if (t !== ui.region && player.grounded) { ui.region = t; showRegion(t); }
+  if (game.realm === 'main' && t !== ui.region && player.grounded) { ui.region = t; showRegion(t); }
   // scanner + labels
   const scan = game.scanning;
   for (const n of world.nodes.values()) {
@@ -2078,6 +2103,12 @@ class SoundFX {
       case 'exhausted': this.tone(240, 0.45, { slide: 120, type: 'triangle', vol: 0.08 }); break;
       case 'emote': this.tone(660, 0.12, { type: 'triangle', vol: 0.06 }); this.tone(880, 0.14, { type: 'triangle', vol: 0.06, delay: 0.09 }); break;
       case 'ui': this.tone(900, 0.05, { vol: 0.03 }); break;
+      case 'portal': this.noise(0.9, { freq: 300, slide: 3200, q: 0.6, vol: 0.18 }); this.arp([392, 523, 784, 1047], 0.06, { dur: 0.5, vol: 0.07 }); break;
+      case 'quest': this.arp([523, 659, 784], 0.09, { type: 'triangle', dur: 0.5, vol: 0.1 }); break;
+      case 'plate': this.tone(150, 0.25, { type: 'triangle', vol: 0.15 }); this.noise(0.15, { freq: 200, type: 'lowpass', vol: 0.15 }); break;
+      case 'door': this.noise(2.2, { freq: 120, type: 'lowpass', vol: 0.3 }); this.tone(80, 2, { type: 'sawtooth', vol: 0.03 }); break;
+      case 'rotate': this.noise(0.2, { freq: 900, q: 3, vol: 0.08 }); this.tone(600, 0.08, { type: 'square', vol: 0.02 }); break;
+      case 'dialog': this.tone(880 + Math.random() * 120, 0.05, { type: 'triangle', vol: 0.04 }); break;
     }
   }
   // ambience + music: called every frame with a summary of the scene
@@ -2177,6 +2208,7 @@ const fireflies = (() => {
 const winGlass = toon(0x9fe3ea, { emissive: 0x2a7f8a, emissiveIntensity: 0.12 }); // same cached material the windows use
 const WIN_DAY = new THREE.Color(0x2a7f8a), WIN_NIGHT = new THREE.Color(0xffb85c);
 const dayState = { day: 1, sunDir: new V3() };
+const GROTTO_SKY = new THREE.Color(0x6a4fb0), GROTTO_FOG = new THREE.Color(0x8a6fc0);
 function updateDayNight(dt, gp) {
   const nightish = Math.sin((game.tod - 0.25) * Math.PI * 2) < 0;
   game.tod = (game.tod + dt / DAY_LEN * (nightish ? 2 : 1)) % 1;
@@ -2188,6 +2220,7 @@ function updateDayNight(dt, gp) {
   const top = skyMat.uniforms.top.value, bot = skyMat.uniforms.bottom.value;
   top.lerpColors(SKY.topDull, SKY.top, gp).lerp(NIGHT.top, 1 - day);
   bot.lerpColors(SKY.botDull, SKY.bot, gp).lerp(NIGHT.bot, 1 - day).lerp(NIGHT.sunset, sunset * 0.55);
+  if (game.realm === 'grotto') { top.lerp(GROTTO_SKY, 0.45); bot.lerp(GROTTO_FOG, 0.5); }
   scene.fog.color.copy(bot);
   // lights: sun by day, moon by night
   const moonDir = sunDir.clone().multiplyScalar(-1); moonDir.y = Math.abs(moonDir.y) + 0.25; moonDir.normalize();
@@ -2268,7 +2301,11 @@ const relics = RELICS.map(d => {
 const RELIC_UNLOCKS = [[3, 'hat', 7, 'Leaf crown hat'], [6, 'glider', 8, 'Rainbow glider'], [9, 'hat', 8, 'Sprout hat'], [12, 'glider', 9, 'Golden glider']];
 function relicsFound() { return relics.filter(r => r.found).length; }
 (() => { const saved = store.get('canopy-spire-relics', []); if (Array.isArray(saved)) for (const r of relics) if (saved.includes(r.id)) { r.found = true; r.g.visible = false; } })();
-function lockedLook(key, i) { for (const [n, k, idx] of RELIC_UNLOCKS) if (((key === 'hat' && k === 'hat') || (key === 'g' && k === 'glider')) && idx === i) return relicsFound() < n ? n : 0; return 0; }
+function lockedLook(key, i) {
+  if ((key === 'hat' && i === 9) || (key === 'g' && i === 10)) return QS.q.q5 === 'done' ? '' : 'Complete “The Keepers’ Blessing” quest to unlock';
+  for (const [n, k, idx] of RELIC_UNLOCKS) if (((key === 'hat' && k === 'hat') || (key === 'g' && k === 'glider')) && idx === i) return relicsFound() < n ? `Find ${n} Seed Relics to unlock` : '';
+  return '';
+}
 function collectRelic(r) {
   r.found = true; r.g.visible = false; store.set('canopy-spire-relics', relics.filter(x => x.found).map(x => x.id));
   const n = relicsFound(); sfx.play('relic'); world.burst(r.pos.clone(), 0xffe08a, 140);
@@ -2389,7 +2426,8 @@ function updateCompass() {
   const put = (key, cls, html, bearing) => { let rel = ((bearing - head + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; const el = cmpEl(key, cls, html); const vis = Math.abs(rel) < FOVC / 2; el.style.display = vis ? '' : 'none'; if (vis) { el.style.left = (W / 2 + rel / FOVC * W) + 'px'; el.style.opacity = 1 - Math.abs(rel) / (FOVC / 2) * 0.6; } };
   const bear = p => Math.atan2(p.x - player.pos.x, -(p.z - player.pos.z));
   [['N', 0], ['NE', Math.PI / 4], ['E', Math.PI / 2], ['SE', Math.PI * 0.75], ['S', Math.PI], ['SW', -Math.PI * 0.75], ['W', -Math.PI / 2], ['NW', -Math.PI / 4]].forEach(([l, b]) => put('c' + l, l.length > 1 ? 'cdir sm' : 'cdir', l, b));
-  for (const n of world.nodes.values()) if (!n.restored) put('n' + n.id, 'node' + (game.tracked === n.id ? ' trk' : ''), TYPE_ICON[n.def.type], bear(n.group.position));
+  questCompass(put, bear);
+  for (const n of world.nodes.values()) if (!n.restored && n.group.position.distanceTo(player.pos) < 600) put('n' + n.id, 'node' + (game.tracked === n.id ? ' trk' : ''), TYPE_ICON[n.def.type], bear(n.group.position));
   for (const r of game.remotes.values()) if (r.pos.y > -50) put('p' + r.id, 'mate', `<i style="background:${safeColor(r.color)}"></i>`, bear(r.pos));
   for (const pg of pings) put('g' + pings.indexOf(pg) + pg.id + pg.pos.x.toFixed(0), 'pingc', `<i style="border-color:${safeColor(pg.color)}"></i>`, bear(pg.pos));
   if (!courseRun) for (const c of courses) if (c.active && c.rings[0].pos.distanceTo(player.pos) < 120) put('k' + c.id, 'course', '🏁', bear(c.rings[0].pos));
@@ -2452,6 +2490,495 @@ function onBounce(box) { const p = pads.find(p => p.col === box); if (p) p.squas
 player.onBounce = onBounce;
 
 // =====================================================================
+// QUESTS, PUZZLES & PORTAL REALMS
+// Keepers give a quest chain; three co-op puzzles (host-authoritative,
+// saved with the world) open portals to two new realms.
+// =====================================================================
+const VA = a => new V3(a[0], a[1], a[2]);
+const xzDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const interactables = [];
+const addInteract = o => (interactables.push(o), o);
+function nearestInteract() {
+  const c = player.pos.clone(); c.y += 0.9; let best = null, bd = Infinity;
+  for (const it of interactables) { const d = c.distanceTo(it.pos); if (d > it.range) continue; const lab = it.label(); if (!lab) continue; const score = d - (it.prio || 0); if (score < bd) { bd = score; best = it; } }
+  return best;
+}
+const realmAt = p => p.x > 1500 ? 'sky' : p.x < -1500 ? 'grotto' : 'main';
+game.realm = 'main';
+player.killY = () => game.realm === 'sky' ? REALMS.sky.c[1] - 40 : game.realm === 'grotto' ? -10 : -3.5;
+const statics = []; // static meshes built here, merged at the end
+
+// ---------- puzzle state (shared world state; host-authoritative) ----------
+const CHIME_NOTES = [523.3, 587.3, 659.3, 784.0, 880.0], CHIME_COLS = [0xff6b6b, 0xffa94d, 0xffe066, 0x69db7c, 0x4dabf7];
+const CHIME_LEN = [0, 3, 5, 7];
+const PLATE_POS = [[52, -34], [52, -42], [47, -38]], STONE_HOME = [[44, -29], [44, -48], [57, -50]], KEY_POS = [63, 0, -38];
+const MIRROR_CELLS = [[1, 3], [2, 3], [2, 5], [5, 5], [4, 3], [4, 1], [5, 1]];
+const G0 = VA(REALMS.grotto.c), S0 = VA(REALMS.sky.c);
+const cellPos = (c, r) => new V3(G0.x + (c - 3) * 5, 0, G0.z + (r - 3) * 5);
+function defaultPuzzles() {
+  return {
+    chimes: { solved: false, round: 0, seq: [], pos: 0, phase: 'idle', n: 0 },
+    plates: { solved: false, key: false, pressed: [false, false, false], stones: STONE_HOME.map(([x, z]) => ({ p: [x, 0, z], c: null })), n: 0 },
+    mirrors: { states: [0, 0, 0, 0, 0, 0, 0], solved: false, n: 0 },
+  };
+}
+const PHASES = new Set(['idle', 'show', 'input', 'wait', 'fail', 'done']);
+function sanitizePuzzle(id, s) {
+  const d = defaultPuzzles()[id]; if (!d || !s || typeof s !== 'object') return d;
+  const n = safeInt(s.n, 0, 1e9);
+  if (id === 'chimes') {
+    const seq = Array.isArray(s.seq) ? s.seq.slice(0, 7).map(v => safeInt(v, 0, 4)) : [];
+    const o = { solved: s.solved === true, round: safeInt(s.round, 0, 3), seq, pos: safeInt(s.pos, 0, 7), phase: PHASES.has(s.phase) ? s.phase : 'idle', n };
+    if (s.hit && typeof s.hit === 'object') o.hit = { i: safeInt(s.hit.i, 0, 4), ok: s.hit.ok === true };
+    return o;
+  }
+  if (id === 'plates') {
+    const stones = d.stones.map((def, i) => { const st = Array.isArray(s.stones) && s.stones[i]; const p = st && safeVec(st.p); return { p: p || def.p, c: st && safeId(st.c) ? st.c : null }; });
+    return { solved: s.solved === true, key: s.key === true, pressed: [0, 1, 2].map(i => Array.isArray(s.pressed) && s.pressed[i] === true), stones, n };
+  }
+  if (id === 'mirrors') return { states: d.states.map((_, i) => Array.isArray(s.states) ? safeInt(s.states[i], 0, 2) : 0), solved: s.solved === true, n };
+  return d;
+}
+game.puzzles = defaultPuzzles();
+function persistPuzzles() { // what gets written into the world save
+  const P = JSON.parse(JSON.stringify(game.puzzles));
+  P.chimes = { ...P.chimes, phase: P.chimes.solved ? 'done' : 'idle', round: 0, pos: 0 }; delete P.chimes.hit;
+  P.plates.stones.forEach(s => { if (s.c) { s.c = null; s.p = [s.p[0], s.p[1], s.p[2]]; } });
+  return P;
+}
+// Beam tracing on the 7x7 mirror grid. States: 0 '/', 1 '\', 2 lowered (beam passes).
+function traceBeam(states) {
+  const segs = [], hits = new Set(), seen = new Set(), beams = [{ c: -1, r: 3, dc: 1, dr: 0 }];
+  while (beams.length) {
+    const b = beams.pop(); let c = b.c, r = b.r, dc = b.dc, dr = b.dr, sc = c, sr = r;
+    for (let i = 0; i < 40; i++) {
+      c += dc; r += dr;
+      const k = `${c},${r},${dc},${dr}`; if (seen.has(k)) { segs.push([sc, sr, c, r]); break; } seen.add(k);
+      if (c < 0 || c > 6 || r < 0 || r > 6) { if (c === 5 && r === -1) hits.add('R1'); if (c === 7 && r === 5) hits.add('R2'); segs.push([sc, sr, c, r]); break; }
+      if (c === 2 && r === 1) { segs.push([sc, sr, c - dc * 0.35, r - dr * 0.35]); break; } // obsidian blocker
+      if (c === 4 && r === 5) { beams.push({ c, r, dc: dr, dr: -dc }); continue; }       // prism: also splits to the left
+      const mi = MIRROR_CELLS.findIndex(m => m[0] === c && m[1] === r);
+      if (mi >= 0 && states[mi] !== 2) { segs.push([sc, sr, c, r]); if (states[mi] === 0) [dc, dr] = [-dr, -dc]; else [dc, dr] = [dr, dc]; sc = c; sr = r; }
+    }
+  }
+  return { segs, hits };
+}
+function senderPos(net, from) {
+  if (from === net.selfId) return player.pos.clone();
+  const pl = net.auth.players.get(from); return pl && Array.isArray(pl.p) ? VA(pl.p) : null;
+}
+// ----- host side -----
+function puzzleHost(net, from, m) {
+  const A = net.auth, id = m.id; if (!A.puzzles || !Object.hasOwn(A.puzzles, id)) return;
+  const PZ = A.puzzles[id], sp = senderPos(net, from); if (!sp) return;
+  const send = () => { PZ.n++; net.broadcast({ t: 'PUZZLE_STATE', id, s: PZ }); delete PZ.hit; };
+  if (id === 'chimes') {
+    const C = PZ, ctr = VA(PLAZAS.chimes);
+    const showRound = () => { C.phase = 'show'; C.pos = 0; send(); const len = CHIME_LEN[C.round]; clearTimeout(net.chimeT); net.chimeT = setTimeout(() => { if (C.phase === 'show') { C.phase = 'input'; send(); } }, (len * 0.65 + 0.9) * 1000); };
+    if (m.a === 'start') {
+      if (C.solved || C.phase === 'show' || C.phase === 'input' || C.phase === 'wait' || xzDist(sp, ctr) > 9) return;
+      C.seq = Array.from({ length: 7 }, () => Math.floor(Math.random() * 5)); C.round = 1; showRound();
+    } else if (m.a === 'hit') {
+      const i = safeInt(m.i, 0, 4), pill = chimePillarPos(i); if (sp.distanceTo(pill) > 4.5) return;
+      if (C.solved) { C.hit = { i, ok: true }; send(); return; } // free play once solved
+      if (C.phase !== 'input') return;
+      if (C.seq[C.pos] === i) {
+        C.pos++; C.hit = { i, ok: true };
+        if (C.pos >= CHIME_LEN[C.round]) {
+          if (C.round >= 3) { C.solved = true; C.phase = 'done'; send(); }
+          else { C.round++; C.phase = 'wait'; send(); setTimeout(showRound, 1300); }
+        } else send();
+      } else { C.hit = { i, ok: false }; C.phase = 'fail'; C.pos = 0; send(); setTimeout(showRound, 1500); }
+    }
+  } else if (id === 'plates') {
+    const Pl = PZ, i = safeInt(m.i, 0, 2), st = Pl.stones[i];
+    if (m.a === 'pick') {
+      if (st.c || Pl.stones.some(s => s.c === from) || sp.distanceTo(VA(st.p)) > 3.2) return;
+      st.c = from; send();
+    } else if (m.a === 'drop') {
+      const p = safeVec(m.p); if (st.c !== from || !p || VA(p).distanceTo(sp) > 4) return;
+      const plate = PLATE_POS.find(([x, z]) => Math.hypot(p[0] - x, p[2] - z) < 2.2);
+      st.p = plate ? [plate[0], 0.18, plate[1]] : p; st.c = null; send();
+    } else if (m.a === 'claim') {
+      if (!Pl.solved || Pl.key || sp.distanceTo(VA(KEY_POS)) > 4) return;
+      Pl.key = true; send();
+    }
+  } else if (id === 'mirrors' && m.a === 'rot') {
+    const M = PZ, i = safeInt(m.i, 0, 6); if (M.solved) return;
+    const [c, r] = MIRROR_CELLS[i]; if (xzDist(sp, cellPos(c, r)) > 4) return;
+    M.states[i] = (M.states[i] + 1) % 3;
+    if (traceBeam(M.states).hits.size === 2) M.solved = true;
+    send();
+  }
+}
+function puzzleHostTick(net) { // plates are pressed by players or seed-stones standing on them
+  const A = net.auth; if (!A || !A.puzzles) return; const Pl = A.puzzles.plates;
+  const bodies = [player.pos.clone()];
+  for (const [id, pl] of A.players) if (id !== net.selfId && Array.isArray(pl.p)) bodies.push(VA(pl.p));
+  for (const s of Pl.stones) if (!s.c) bodies.push(VA(s.p));
+  let changed = false;
+  PLATE_POS.forEach(([x, z], i) => { const on = bodies.some(b => Math.hypot(b.x - x, b.z - z) < 1.35 && b.y < 1.6 && b.y > -0.5); if (on !== Pl.pressed[i]) { Pl.pressed[i] = on; changed = true; } });
+  if (!Pl.solved && Pl.pressed.every(Boolean)) { Pl.solved = true; changed = true; }
+  if (changed) { Pl.n++; net.broadcast({ t: 'PUZZLE_STATE', id: 'plates', s: Pl }); }
+}
+function puzzleDropCarrier(net, id) { // a player left while carrying a seed-stone
+  const A = net.auth; if (!A || !A.puzzles) return; const pl = A.players.get(id);
+  let ch = false; for (const s of A.puzzles.plates.stones) if (s.c === id) { s.c = null; if (pl && Array.isArray(pl.p)) s.p = [pl.p[0], Math.max(0, pl.p[1]), pl.p[2]]; ch = true; }
+  if (ch) { A.puzzles.plates.n++; net.broadcast({ t: 'PUZZLE_STATE', id: 'plates', s: A.puzzles.plates }); }
+}
+
+// ---------- shared building helpers ----------
+const stoneMat = toon(0xe9e1cf, { map: TEX.stone }), paveMat = toon(0xe9e1cf, { map: TEX.tile }), darkStone = toon(0x5a5470, { map: TEX.stone });
+function plazaFloor(c, r) {
+  world.put(cylGeo(r, r, 0.12, 48), paveMat, c.x, 0.06, c.z, { cast: false });
+  world.put(new THREE.TorusGeometry(r, 0.22, 6, 60), toon(PAL.teal), c.x, 0.12, c.z, { rx: Math.PI / 2 });
+}
+function glowMat(hex, k = 0.25) { return toon(hex, { emissive: hex, emissiveIntensity: k, unique: true }); }
+
+// ---------- Puzzle 1: the Songbird Stone (chime memory) ----------
+const CHP = VA(PLAZAS.chimes);
+function chimePillarPos(i) { const a = Math.PI + (i - 2) * 0.55; return new V3(CHP.x + Math.cos(a) * 6.5, 1.6, CHP.z + Math.sin(a) * 6.5); }
+plazaFloor(CHP, 11);
+world.put(rockGeo(1.5, 7), toon(0x9aa7b0), CHP.x, 0.7, CHP.z, { sy: 0.9 });
+phys.add(CHP.x - 1.2, 0, CHP.z - 1.2, CHP.x + 1.2, 1.7, CHP.z + 1.2, 'stone');
+const songbird = new THREE.Group(); songbird.position.set(CHP.x, 1.75, CHP.z); scene.add(songbird);
+{ const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), toon(0x7ec8e3)); body.scale.set(1, 0.85, 1.25); songbird.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 10), toon(0x7ec8e3)); head.position.set(0, 0.36, 0.38); songbird.add(head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.26, 8), toon(0xffb74d)); beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.34, 0.68); songbird.add(beak);
+  for (const s of [-1, 1]) { const w = new THREE.Mesh(ICO1, toon(0x4fa3c7)); w.scale.set(0.12, 0.28, 0.42); w.position.set(s * 0.42, 0.05, -0.05); songbird.add(w); const e = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), toon(0x222222)); e.position.set(s * 0.12, 0.42, 0.58); songbird.add(e); } }
+const songRing = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.07, 6, 48), glowMat(0x7ff0ff, 0.1)); songRing.rotation.x = Math.PI / 2; songRing.position.set(CHP.x, 1.25, CHP.z); scene.add(songRing);
+const chimes = [0, 1, 2, 3, 4].map(i => {
+  const p = chimePillarPos(i);
+  world.block(p.x - 0.45, 0, p.z - 0.45, p.x + 0.45, 3.4, p.z + 0.45, stoneMat, { r: 0.12 });
+  world.block(p.x - 0.65, 3.4, p.z - 0.65, p.x + 0.65, 3.7, p.z + 0.65, toon(PAL.brass), { collide: false, r: 0.08 });
+  const mat = glowMat(CHIME_COLS[i], 0.12), crystal = new THREE.Mesh(facet(new THREE.OctahedronGeometry(0.42)), mat);
+  crystal.scale.y = 1.6; crystal.position.set(p.x, 4.6, p.z); scene.add(crystal);
+  const plate = new THREE.Mesh(cylGeo(0.8, 0.85, 0.1, 24), mat); plate.position.set(p.x + (CHP.x - p.x) * 0.22, 0.13, p.z + (CHP.z - p.z) * 0.22); scene.add(plate);
+  return { i, p, mat, crystal, glow: 0 };
+});
+function chimeFlash(i, ok = true) {
+  const c = chimes[i]; c.glow = 1;
+  if (ok) { sfx.tone(CHIME_NOTES[i], 1.1, { type: 'triangle', vol: 0.16 }); sfx.tone(CHIME_NOTES[i] * 2, 0.8, { vol: 0.05, delay: 0.01 }); }
+  else sfx.play('miss');
+}
+let melodyTimers = [];
+function playMelody(seq, len) { melodyTimers.forEach(clearTimeout); melodyTimers = []; for (let k = 0; k < len; k++) melodyTimers.push(setTimeout(() => chimeFlash(seq[k]), 500 + k * 650)); songbird.userData.sing = len * 0.65 + 0.6; }
+addInteract({ pos: CHP.clone().setY(1.5), range: 3.6, prio: 0.2, label: () => { const C = game.puzzles.chimes; return C.solved ? '🎶 The Songbird Stone hums happily' : C.phase === 'idle' || C.phase === 'done' ? '<span class="key">E</span> Wake the Songbird Stone' : C.phase === 'input' ? `🎵 Your turn — echo the melody (${C.pos}/${CHIME_LEN[C.round]})` : '🎵 Listen closely…'; },
+  act: () => { const C = game.puzzles.chimes; if (!C.solved && (C.phase === 'idle' || C.phase === 'done')) puzzleSend('chimes', 'start'); } });
+chimes.forEach(c => addInteract({ pos: c.p, range: 2.8, label: () => { const C = game.puzzles.chimes; return C.solved || C.phase === 'input' ? '<span class="key">E</span> Ring the chime' : '🔔 A silent chime (wake the Songbird Stone)'; },
+  act: () => { const C = game.puzzles.chimes; if (C.solved || C.phase === 'input') puzzleSend('chimes', 'hit', { i: c.i }); } }));
+
+// ---------- Puzzle 2: the Root Vault (pressure plates + seed-stones) ----------
+const VC = VA(PLAZAS.vault);
+plazaFloor(new V3(52, 0, -38), 10.5);
+const vMat = toon(0xcfc6b0, { map: TEX.stone }), vTrim = toon(0x6fa86a);
+world.block(58, 0, -42, 66, 6, -41, vMat); world.block(58, 0, -35, 66, 6, -34, vMat); world.block(65, 0, -41, 66, 6, -35, vMat);
+world.block(58, 0, -41, 59, 6, -39.5, vMat); world.block(58, 0, -36.5, 59, 6, -35, vMat); world.block(58, 4.2, -39.5, 59, 6, -36.5, vMat);
+world.block(57.6, 6, -42.4, 66.4, 6.7, -33.6, vTrim, { r: 0.15 });
+world.put(new THREE.TorusGeometry(1.6, 0.22, 8, 20, Math.PI), toon(PAL.brass), 57.95, 4.2, -38, { ry: Math.PI / 2 });
+for (const z of [-41.6, -34.4]) world.vines(58, z, 2, 6, -1, 0, 0, 1.2);
+const doorMesh = new THREE.Mesh(boxGeo(0.5, 4.2, 3, 3, 0.06), toon(0x8a5a33, { map: TEX.wood })); doorMesh.position.set(58.5, 2.1, -38); doorMesh.castShadow = true; scene.add(doorMesh);
+const doorCol = phys.add(58.2, 0, -39.5, 58.8, 4.2, -36.5, 'door');
+const keyGroup = new THREE.Group(); keyGroup.position.set(KEY_POS[0], 1.6, KEY_POS[2]); scene.add(keyGroup);
+world.put(cylGeo(0.5, 0.65, 1.1, 16, TEX.stone), vMat, KEY_POS[0], 0.55, KEY_POS[2]);
+{ const km = glowMat(0xffd54f, 0.6); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.06, 8, 20), km); ring.position.y = 0.35; keyGroup.add(ring); const bar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 0.08), km); keyGroup.add(bar); const t = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.08), km); t.position.set(0.1, -0.22, 0); keyGroup.add(t); }
+const plates = PLATE_POS.map(([x, z]) => { const mat = glowMat(0x8bd34a, 0.05); const m = new THREE.Mesh(cylGeo(1.2, 1.3, 0.18, 32), mat); m.position.set(x, 0.09, z); m.receiveShadow = true; scene.add(m); const rune = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.06, 6, 24), mat); rune.rotation.x = Math.PI / 2; rune.position.set(x, 0.2, z); scene.add(rune); return { mat, m }; });
+const stones = STONE_HOME.map((_, i) => { const g = new THREE.Group(); scene.add(g); const r = new THREE.Mesh(rockGeo(0.6, 30 + i), toon(0xa59a8a)); r.position.y = 0.5; r.castShadow = true; g.add(r); const seed = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.05, 6, 20), glowMat(0x8bd34a, 0.5)); seed.position.y = 0.55; seed.rotation.y = i; g.add(seed); return g; });
+stones.forEach((g, i) => addInteract({ get pos() { return g.position.clone().setY(g.position.y + 0.6); }, range: 2.6, label: () => { const st = game.puzzles.plates.stones[i]; return !st.c && !myStone() ? '<span class="key">E</span> Lift the seed-stone' : null; }, act: () => puzzleSend('plates', 'pick', { i }) }));
+addInteract({ pos: VA(KEY_POS).setY(1.6), range: 3, label: () => { const Pl = game.puzzles.plates; return Pl.solved && !Pl.key ? '<span class="key">E</span> Claim the Grotto Key' : null; }, act: () => puzzleSend('plates', 'claim') });
+const myStone = () => game.puzzles.plates.stones.findIndex(s => s.c === game.net.selfId) + 1;
+function dropStone() {
+  const i = myStone() - 1; if (i < 0) return;
+  const f = new V3(Math.sin(player.yaw), 0, Math.cos(player.yaw)), p = player.pos.clone().addScaledVector(f, 1.4);
+  const top = phys.surfaceY(p.x, p.z, player.pos.y + 1); p.y = top ?? player.pos.y;
+  puzzleSend('plates', 'drop', { i, p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)] });
+}
+
+// ---------- Realm: Crystal Grotto (mirror puzzle) ----------
+{
+  const floor = toon(0x6e668f, { map: TEX.tile }), wall = toon(0x4b4568, { map: TEX.stone });
+  world.block(G0.x - 40, -6, G0.z - 40, G0.x + 40, 0, G0.z + 40, floor, { r: 0.5 });
+  world.block(G0.x - 44, -6, G0.z - 44, G0.x + 44, 22, G0.z - 40, wall, { r: 0.8 }); world.block(G0.x - 44, -6, G0.z + 40, G0.x + 44, 22, G0.z + 44, wall, { r: 0.8 });
+  world.block(G0.x - 44, -6, G0.z - 40, G0.x - 40, 22, G0.z + 40, wall, { r: 0.8 }); world.block(G0.x + 40, -6, G0.z - 40, G0.x + 44, 22, G0.z + 40, wall, { r: 0.8 });
+  const r = mulberry32(77), cc = [0x9b7bff, 0x6fe3ff, 0xff8fd1, 0x7dffb2];
+  for (let i = 0; i < 70; i++) {
+    const side = i % 4, t = (r() - 0.5) * 76, x = side === 0 ? G0.x - 38.5 + r() * 2 : side === 1 ? G0.x + 38.5 - r() * 2 : G0.x + t, z = side === 2 ? G0.z - 38.5 + r() * 2 : side === 3 ? G0.z + 38.5 - r() * 2 : G0.z + t;
+    const h = 1.2 + r() * 4, g = facet(new THREE.OctahedronGeometry(0.6 + r() * 0.6)); g.scale(1, h, 1);
+    world.put(g, toon(cc[i % 4], { emissive: cc[i % 4], emissiveIntensity: 0.55 }), x, h * 0.45, z, { rx: (r() - 0.5) * 0.5, rz: (r() - 0.5) * 0.5, cast: false });
+  }
+  for (let i = 0; i < 18; i++) { const x = G0.x + (r() - 0.5) * 70, z = G0.z + (r() - 0.5) * 70; if (Math.abs(x - G0.x) < 22 && Math.abs(z - G0.z) < 22) continue; world.put(cylGeo(0.08, 0.12, 0.5, 8), toon(0xf3e9d2), x, 0.25, z); world.put(new THREE.SphereGeometry(0.35, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), toon(0x7dffb2, { emissive: 0x3dff9a, emissiveIntensity: 0.6 }), x, 0.5, z, { sy: 0.6 }); }
+  const line = noOutline(new THREE.MeshBasicMaterial({ color: 0x9b7bff, transparent: true, opacity: 0.35 }));
+  for (let k = 0; k <= 7; k++) { const o = -17.5 + k * 5; world.put(new THREE.BoxGeometry(35, 0.02, 0.08), line, G0.x, 0.02, G0.z + o, { cast: false }); world.put(new THREE.BoxGeometry(0.08, 0.02, 35), line, G0.x + o, 0.02, G0.z, { cast: false }); }
+  for (const s of [-1, 1]) world.vines(G0.x + s * 40, G0.z, 10, 22, -s, 0, 3, 60);
+}
+const sunCrystal = new THREE.Mesh(facet(new THREE.OctahedronGeometry(1.0)), glowMat(0xffd54f, 1.2)); sunCrystal.scale.y = 1.5; { const p = cellPos(-1, 3); sunCrystal.position.set(p.x, 2.2, p.z); world.put(cylGeo(0.9, 1.1, 1.0, 16, TEX.stone), stoneMat, p.x, 0.5, p.z); phys.add(p.x - 0.9, 0, p.z - 0.9, p.x + 0.9, 1.0, p.z + 0.9); } scene.add(sunCrystal);
+const receivers = [[5, -1], [7, 5]].map(([c, r]) => { const p = cellPos(c, r); world.put(cylGeo(0.8, 1.0, 1.0, 16, TEX.stone), stoneMat, p.x, 0.5, p.z); phys.add(p.x - 0.8, 0, p.z - 0.8, p.x + 0.8, 1.0, p.z + 0.8); const mat = glowMat(0x9b7bff, 0.1); const f = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7, 0), mat); f.position.set(p.x, 1.9, p.z); scene.add(f); return { mat, f }; });
+{ const p = cellPos(2, 1); world.block(p.x - 0.9, 0, p.z - 0.9, p.x + 0.9, 3.4, p.z + 0.9, toon(0x26232f), { r: 0.2 }); }
+const prism = new THREE.Mesh(new THREE.TetrahedronGeometry(0.9), toon(0xdff7ff, { emissive: 0x9fe8ff, emissiveIntensity: 0.6, transparent: true, opacity: 0.85 })); { const p = cellPos(4, 5); prism.position.set(p.x, 1.7, p.z); world.put(cylGeo(0.5, 0.7, 0.9, 12, TEX.stone), stoneMat, p.x, 0.45, p.z); phys.add(p.x - 0.5, 0, p.z - 0.5, p.x + 0.5, 0.9, p.z + 0.5); } scene.add(prism);
+const mirrors = MIRROR_CELLS.map(([c, r], i) => {
+  const p = cellPos(c, r); world.put(cylGeo(0.55, 0.7, 0.6, 16, TEX.stone), stoneMat, p.x, 0.3, p.z); phys.add(p.x - 0.5, 0, p.z - 0.5, p.x + 0.5, 0.6, p.z + 0.5);
+  const g = new THREE.Group(); g.position.set(p.x, 0.6, p.z); scene.add(g);
+  const panel = new THREE.Mesh(boxGeo(2.2, 1.9, 0.14, 0, 0.05), toon(0xdbe9ff, { emissive: 0x7aa7ff, emissiveIntensity: 0.35 })); panel.position.y = 1.0; panel.castShadow = true; g.add(panel);
+  const frame = new THREE.Mesh(new THREE.TorusGeometry(1.15, 0.06, 6, 4), toon(PAL.brass)); frame.rotation.z = Math.PI / 4; frame.position.y = 1.0; frame.scale.y = 0.85; g.add(frame);
+  addInteract({ pos: p.clone().setY(1.2), range: 2.9, label: () => game.puzzles.mirrors.solved ? null : '<span class="key">E</span> Turn the mirror', act: () => puzzleSend('mirrors', 'rot', { i }) });
+  return { g, panel, frame, target: 0, cur: 0, lift: 1 };
+});
+const beamGroup = new THREE.Group(); scene.add(beamGroup);
+const beamMat = noOutline(new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+const beamGlow = noOutline(new THREE.MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }));
+function drawBeams() {
+  while (beamGroup.children.length) { const m = beamGroup.children.pop(); m.geometry.dispose(); }
+  const { segs, hits } = traceBeam(game.puzzles.mirrors.states);
+  for (const [c0, r0, c1, r1] of segs) {
+    const a = cellPos(c0, r0), b = cellPos(c1, r1); a.y = b.y = 1.6; const len = a.distanceTo(b); if (len < 0.01) continue;
+    for (const [rad, mat] of [[0.07, beamMat], [0.22, beamGlow]]) { const g = new THREE.CylinderGeometry(rad, rad, len, 8, 1, true); g.rotateX(Math.PI / 2); const m = new THREE.Mesh(g, mat); m.position.copy(a).add(b).multiplyScalar(0.5); m.lookAt(b); beamGroup.add(m); }
+  }
+  receivers[0].mat.emissiveIntensity = hits.has('R1') ? 1.4 : 0.1; receivers[1].mat.emissiveIntensity = hits.has('R2') ? 1.4 : 0.1;
+}
+const grottoOrb = new THREE.Group(); grottoOrb.position.set(G0.x, 1.8, G0.z); scene.add(grottoOrb);
+world.put(cylGeo(0.7, 0.9, 1.2, 16, TEX.stone), stoneMat, G0.x, 0.6, G0.z); phys.add(G0.x - 0.7, 0, G0.z - 0.7, G0.x + 0.7, 1.2, G0.z + 0.7);
+{ const o = new THREE.Mesh(new THREE.SphereGeometry(0.45, 24, 16), glowMat(0xc6a8ff, 0.9)); grottoOrb.add(o); const h = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.04, 6, 32), glowMat(0xffffff, 0.8)); h.rotation.x = Math.PI / 2; grottoOrb.add(h); }
+addInteract({ pos: G0.clone().setY(1.6), range: 3, prio: 0.3, label: () => game.puzzles.mirrors.solved && !QS.orbs.grotto ? '<span class="key">E</span> Take the Spirit Orb of Light' : null, act: () => takeOrb('grotto') });
+
+// ---------- Realm: Sky Archipelago (parkour trial) ----------
+const skyGrass = toon(0x8fd16a, { map: TEX.grass }), skyRock = toon(0x8f8aa0, { map: TEX.stone }), skyIslands = [];
+function skyIsland(x, y, z, w, d) {
+  const X = S0.x + x, Y = S0.y + y, Z = S0.z + z;
+  world.block(X - w / 2, Y - 1.6, Z - d / 2, X + w / 2, Y, Z + d / 2, skyGrass, { r: 0.6 });
+  const m = Math.min(w, d), rr = mulberry32(Math.round(x * 13 + z * 7 + 1000));
+  world.put(new THREE.ConeGeometry(m * 0.6, m * 1.0, 9), skyRock, X, Y - 1.6 - m * 0.5, Z, { rx: Math.PI, ry: rr() * 6 });
+  for (let k = 0; k < Math.floor(w * d / 18); k++) { const fx = X + (rr() - 0.5) * (w - 1.2), fz = Z + (rr() - 0.5) * (d - 1.2); world.flower(fx, Y, fz, 3, [PAL.blossom, PAL.flower, 0xffffff, 0x74c0fc][k % 4], 1); }
+  skyIslands.push([X, Y, Z, w, d]);
+}
+function skyTree(x, y, z, s, col) { const X = S0.x + x, Y = S0.y + y, Z = S0.z + z; world.put(cylGeo(0.14 * s, 0.26 * s, 2 * s, 8, TEX.wood), toon(0x8d5e3a, { map: TEX.wood }), X, Y + s, Z); for (let k = 0; k < 4; k++) world.put(ICO1, toon(col), X + Math.cos(k * 1.7) * 0.6 * s, Y + 2.2 * s + (k % 2) * 0.5 * s, Z + Math.sin(k * 1.7) * 0.6 * s, { sx: 0.95 * s, sy: 0.8 * s, sz: 0.95 * s }); phys.add(X - 0.25 * s, Y, Z - 0.25 * s, X + 0.25 * s, Y + 2 * s, Z + 0.25 * s, 'tree'); }
+skyIsland(0, 0, 40, 16, 16); skyIsland(0, 0, 27, 6, 6); skyIsland(8, 2, 19, 5, 5); skyIsland(16, 2, 9, 6, 6); skyIsland(22, 9, -1, 7, 7);
+skyIsland(2, 4, -8, 9, 9); skyIsland(-16, 26, -14, 8, 8); skyIsland(8, 38, -34, 12, 12);
+skyTree(-5, 0, 44, 1.2, 0xf4a6c6); skyTree(5, 0, 36, 1.0, PAL.leaf2); skyTree(24, 9, -3, 0.8, PAL.leaf); skyTree(13, 38, -30, 1.1, 0xf4a6c6); skyTree(-19, 26, -11, 0.8, PAL.leaf2);
+for (const [x, y, z, s] of [[30, 15, 25, 5], [-25, 8, 30, 6], [-30, 40, -40, 7], [35, 30, -30, 6], [10, 55, 10, 4]]) { const X = S0.x + x, Y = S0.y + y, Z = S0.z + z; world.put(boxGeo(s, 1.2, s, 12, 0.5), skyGrass, X, Y, Z); world.put(new THREE.ConeGeometry(s * 0.6, s, 8), skyRock, X, Y - 0.6 - s / 2, Z, { rx: Math.PI }); }
+{ const th = world.thermal('T3', S0.x + 2, S0.z - 8, 3.5, S0.y + 4, S0.y + 34); th.active = true; th.pts.visible = true; th.rings.forEach(r => r.visible = true); th.ventGlow.material.emissiveIntensity = 1.5; }
+world.anchor('SR1', S0.x - 16, S0.y + 35, S0.z - 26, [0, 0, 0]);
+world.anchor('SR2', S0.x + 2.5, S0.y + 42.5, S0.z - 33, [1, 0, 0]);
+world.grassField(-1, 0x8fd16a, 2600, () => { const I = skyIslands[Math.floor(world.rng() * skyIslands.length)], x = I[0] + (world.rng() - 0.5) * (I[3] - 1), z = I[2] + (world.rng() - 0.5) * (I[4] - 1); return phys.pointInside(new V3(x, I[1] + 0.3, z)) ? null : [x, I[1], z]; });
+const SKY_SHRINE = new V3(S0.x + 10, S0.y + 38, S0.z - 36);
+world.put(cylGeo(0.8, 1.0, 1.2, 16, TEX.stone), stoneMat, SKY_SHRINE.x, SKY_SHRINE.y + 0.6, SKY_SHRINE.z); phys.add(SKY_SHRINE.x - 0.8, SKY_SHRINE.y, SKY_SHRINE.z - 0.8, SKY_SHRINE.x + 0.8, SKY_SHRINE.y + 1.2, SKY_SHRINE.z + 0.8);
+for (const s of [-1, 1]) world.block(SKY_SHRINE.x + s * 2.4 - 0.35, SKY_SHRINE.y, SKY_SHRINE.z - 0.35, SKY_SHRINE.x + s * 2.4 + 0.35, SKY_SHRINE.y + 4.5, SKY_SHRINE.z + 0.35, stoneMat, { r: 0.1 });
+world.put(new THREE.TorusGeometry(2.4, 0.3, 8, 20, Math.PI), toon(PAL.teal), SKY_SHRINE.x, SKY_SHRINE.y + 4.5, SKY_SHRINE.z);
+const skyOrb = new THREE.Group(); skyOrb.position.copy(SKY_SHRINE).setY(SKY_SHRINE.y + 1.9); scene.add(skyOrb);
+{ const o = new THREE.Mesh(new THREE.SphereGeometry(0.45, 24, 16), glowMat(0x9be7ff, 0.9)); skyOrb.add(o); const h = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.04, 6, 32), glowMat(0xffffff, 0.8)); h.rotation.x = Math.PI / 2; skyOrb.add(h); }
+addInteract({ pos: SKY_SHRINE.clone().setY(SKY_SHRINE.y + 1.4), range: 3, prio: 0.3, label: () => !QS.orbs.sky ? '<span class="key">E</span> Take the Spirit Orb of Wind' : null, act: () => takeOrb('sky') });
+
+// ---------- Portals ----------
+const PORTAL_DEFS = [
+  { id: 'toSky', pos: [24, 0, -84], face: 0, color: 0x5ad1ff, open: () => game.puzzles.chimes.solved, dest: REALMS.sky.spawn, yaw: 0, name: 'Sky Archipelago', sealed: 'Sealed — wake the Songbird Stone in the west plaza' },
+  { id: 'toGrotto', pos: [36, 0, -84], face: 0, color: 0xb388ff, open: () => game.puzzles.plates.key, dest: REALMS.grotto.spawn, yaw: 0, name: 'Crystal Grotto', sealed: 'Sealed — claim the key in the Root Vault' },
+  { id: 'skyBack', pos: [S0.x, S0.y, S0.z + 47.5], face: Math.PI, color: 0x9be7a0, open: () => true, dest: [24, 0.5, -74], yaw: Math.PI, name: 'Canopy Spire' },
+  { id: 'skyTop', pos: [S0.x + 4, S0.y + 38, S0.z - 39], face: 0, color: 0x9be7a0, open: () => true, dest: [24, 0.5, -74], yaw: Math.PI, name: 'Canopy Spire' },
+  { id: 'grottoBack', pos: [G0.x, 0, G0.z + 33], face: Math.PI, color: 0x9be7a0, open: () => true, dest: [36, 0.5, -74], yaw: Math.PI, name: 'Canopy Spire' },
+];
+plazaFloor(VA(PLAZAS.portals), 12);
+const portalVS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+const portalFS = `uniform float uTime; uniform vec3 uColor; uniform float uOpen; varying vec2 vUv;
+void main(){
+  vec2 q = vec2((vUv.x - 0.5) * 4.2, vUv.y * 7.2);
+  bool inside = (q.y < 5.0 && abs(q.x) < 2.05) || length(vec2(q.x, q.y - 5.0)) < 2.05; if (!inside) discard;
+  vec2 c = q - vec2(0.0, 3.6); float r = length(c), a = atan(c.y, c.x);
+  float sw = sin(a * 4.0 + r * 3.2 - uTime * 2.6) * 0.5 + 0.5, rings = sin(r * 6.0 - uTime * 4.0) * 0.5 + 0.5;
+  vec3 base = mix(vec3(0.42, 0.44, 0.5), uColor, uOpen);
+  vec3 col = base * (0.55 + 0.45 * sw) + vec3(1.0) * pow(rings, 6.0) * 0.4 * uOpen;
+  gl_FragColor = vec4(col, mix(0.3, 0.85, uOpen) * (0.75 + 0.25 * sw));
+  #include <colorspace_fragment>
+}`;
+const portals = PORTAL_DEFS.map(P => {
+  const g = new THREE.Group(); g.position.set(...P.pos); g.rotation.y = P.face; scene.add(g);
+  const sm = toon(0xf3ead6, { map: TEX.stone });
+  for (const s of [-1, 1]) { const p = new THREE.Mesh(boxGeo(0.9, 5.2, 0.9, 4, 0.12), sm); p.position.set(s * 2.5, 2.6, 0); p.castShadow = true; g.add(p); phys.add(P.pos[0] + s * 2.5 - 0.45, P.pos[1], P.pos[2] - 0.45, P.pos[0] + s * 2.5 + 0.45, P.pos[1] + 5.2, P.pos[2] + 0.45, 'portal'); }
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.45, 10, 28, Math.PI), sm); arch.position.y = 5.2; arch.castShadow = true; g.add(arch);
+  const key = new THREE.Mesh(facet(new THREE.OctahedronGeometry(0.5)), glowMat(P.color, 0.6)); key.position.y = 7.9; g.add(key);
+  const base = new THREE.Mesh(boxGeo(6.4, 0.3, 2.2, 4, 0.08), sm); base.position.y = 0.15; base.receiveShadow = true; g.add(base);
+  const mat = noOutline(new THREE.ShaderMaterial({ vertexShader: portalVS, fragmentShader: portalFS, transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(P.color) }, uOpen: { value: 0 } } }));
+  const surf = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 7.2), mat); surf.position.y = 3.6 + 0.0; g.add(surf);
+  const label = mkLabel('portal', '');
+  return { ...P, g, mat, key, label, center: VA(P.pos) };
+});
+let portalCD = 0, sealedCD = 0;
+function teleport(dest, yaw) {
+  $('flash').classList.add('on'); setTimeout(() => $('flash').classList.remove('on'), 380);
+  player.pos.set(dest[0], dest[1], dest[2]); player.vel.set(0, 0, 0); player.state = 'FALL'; player.grapple = null; player.zip = null; player.lastSafe.copy(player.pos);
+  cam.yaw = yaw; cam.target.copy(player.pos); portalCD = 1.5; sfx.play('portal');
+  const r = realmAt(player.pos); game.realm = r;
+  if (r !== 'main') { if (!QS.visited[r]) { QS.visited[r] = true; saveQuests(); } showRegionText(REALMS[r].name, REALMS[r].sub); } else ui.region = -1;
+}
+function updatePortals(dt) {
+  portalCD -= dt; sealedCD -= dt;
+  const ctr = player.pos.clone(); ctr.y += 0.9;
+  for (const P of portals) {
+    const open = P.open(); P.mat.uniforms.uTime.value = world.time; P.mat.uniforms.uOpen.value = lerp(P.mat.uniforms.uOpen.value, open ? 1 : 0, Math.min(1, dt * 2));
+    P.key.rotation.y += dt; P.key.material.emissiveIntensity = open ? 0.9 : 0.15;
+    const near = ctr.distanceTo(P.center) < 16 && game.playing;
+    if (near) { P.label.innerHTML = open ? `✨ ${P.name}` : `🔒 ${P.sealed}`; } place(P.label, P.center.clone().add(new V3(0, 8.6, 0)), near);
+    if (!game.playing || portalCD > 0) continue;
+    const dx = ctr.x - P.center.x, dz = ctr.z - P.center.z, dy = ctr.y - P.center.y;
+    if (Math.abs(dx) < 1.8 && Math.abs(dz) < 0.6 && dy > 0 && dy < 6) {
+      if (open) teleport(P.dest, P.yaw);
+      else if (sealedCD <= 0) { sealedCD = 3; game.toast('🔒 ' + P.sealed); sfx.play('fail'); }
+    }
+  }
+}
+
+// ---------- Keepers & quests ----------
+const QUESTS = [
+  { id: 'q1', name: 'The Songbird Stone', giver: 'mossa', req: () => true,
+    intro: ['Oh! A wanderer — and the wind brought you right to me. I am Mossa, keeper of the old songs.', 'West of the stepping pillars sits the Songbird Stone. Wake it, listen to its melody, then ring the chime pillars in the same order.', 'Three songs, each longer than the last. Do that, and the sealed Sky Portal north of the canopy will remember how to open.'],
+    steps: [{ text: 'Echo the Songbird Stone’s three melodies (west plaza)', done: () => game.puzzles.chimes.solved, where: PLAZAS.chimes }],
+    turnIn: ['I heard it from here! The Sky Portal is humming again — find it at the Portal Plaza, north of the great deck.', 'Take these, for your work on the spire.'], reward: { energy: 2, bio: 2, scrap: 2 } },
+  { id: 'q2', name: 'Two Hands, One Gate', giver: 'brindle', req: () => true,
+    intro: ['Brindle here, vault-warden. The Root Vault only opens when all three plates are held down at once.', 'Bring friends to stand on them — or haul the old seed-stones onto the plates yourself. Press E to lift one, E again to set it down.', 'Inside is the key to the Crystal Grotto.'],
+    steps: [{ text: 'Hold all three pressure plates at once', done: () => game.puzzles.plates.solved, where: [52, 0, -38] }, { text: 'Claim the Grotto Key inside the Root Vault', done: () => game.puzzles.plates.key, where: KEY_POS }],
+    turnIn: ['Ha! The old gate creaked open. The Grotto portal at the plaza should glow violet now.', 'Here — scrap from the vault. Put it to good use.'], reward: { scrap: 3, energy: 2 } },
+  { id: 'q3', name: 'Light in the Grotto', giver: 'aster', req: () => game.puzzles.plates.key || QS.q.q2 === 'done',
+    intro: ['I am Aster. Beyond the violet portal lies the Crystal Grotto, where light itself is the lock.', 'Turn the mirrors so the sunbeam reaches BOTH crystal receivers. The prism splits the light — use that.', 'Bring me back the Spirit Orb of Light.'],
+    steps: [{ text: 'Step through the Grotto portal (Portal Plaza)', done: () => QS.visited.grotto, where: [36, 0, -84] }, { text: 'Guide the sunbeam to both crystal receivers', done: () => game.puzzles.mirrors.solved, where: REALMS.grotto.c }, { text: 'Take the Spirit Orb of Light', done: () => QS.orbs.grotto, where: REALMS.grotto.c }],
+    turnIn: ['The orb of light… it is warm, isn’t it? Keep it safe; Mossa will want to see it.'], reward: { bio: 3 } },
+  { id: 'q4', name: 'Winds of the Archipelago', giver: 'aster', req: () => game.puzzles.chimes.solved || QS.q.q1 === 'done',
+    intro: ['The blue portal leads to the Sky Archipelago — islands adrift on the wind.', 'Jump, bounce, ride the thermal and swing between the rings to reach the summit shrine. Fall, and the wind will catch you.', 'Bring back the Spirit Orb of Wind.'],
+    steps: [{ text: 'Step through the Sky portal (Portal Plaza)', done: () => QS.visited.sky, where: [24, 0, -84] }, { text: 'Reach the summit shrine and take the Spirit Orb of Wind', done: () => QS.orbs.sky, where: [SKY_SHRINE.x, SKY_SHRINE.y, SKY_SHRINE.z] }],
+    turnIn: ['You flew to the summit? Wonderful. The wind remembers you now.'], reward: { energy: 3 } },
+  { id: 'q5', name: 'The Keepers’ Blessing', giver: 'mossa', req: () => QS.q.q3 === 'done' && QS.q.q4 === 'done',
+    intro: ['Aster tells me you carry both Spirit Orbs. Bring them close, wanderer.'],
+    steps: [{ text: 'Bring both Spirit Orbs to Keeper Mossa', done: () => QS.orbs.sky && QS.orbs.grotto, where: KEEPERS[0].pos }],
+    turnIn: ['Light and wind, together again. The spire sings for you.', 'Wear these with pride — the Keeper’s Circlet and the Starlight Glider. You can equip them on the home screen.'], reward: { energy: 3, bio: 3, scrap: 3 }, unlock: true },
+];
+const IDLE_LINES = {
+  mossa: ['The water used to sing all the way down to the sea. Restore the aqueduct and you’ll hear it again.', 'Seed Relics hide in the strangest places — one floats right above the bloom by the south path.'],
+  brindle: ['Seed-stones are heavy, but they don’t complain. Unlike some keepers I know.', 'If you see a pink bloom, jump on it. Trust me.'],
+  aster: ['Night is the best time to watch the fireflies over the restored meadows.', 'The sky-lines from the crown run again once the turbines turn. Fastest way down!'],
+};
+const QS = (() => {
+  const s = store.get('canopy-spire-quests', {}), o = { q: {}, orbs: { sky: false, grotto: false }, visited: { sky: false, grotto: false } };
+  for (const q of QUESTS) { const v = s && s.q && s.q[q.id]; if (v === 'active' || v === 'done') o.q[q.id] = v; }
+  for (const k of ['sky', 'grotto']) { o.orbs[k] = !!(s && s.orbs && s.orbs[k] === true); o.visited[k] = !!(s && s.visited && s.visited[k] === true); }
+  return o;
+})();
+function saveQuests() { store.set('canopy-spire-quests', QS); }
+function questStatus(q) { const s = QS.q[q.id]; if (s === 'done') return 'done'; if (s === 'active') return q.steps.every(st => st.done()) ? 'ready' : 'active'; return q.req() ? 'available' : 'locked'; }
+const curStep = q => q.steps.find(st => !st.done());
+function takeOrb(k) { if (QS.orbs[k]) return; QS.orbs[k] = true; saveQuests(); sfx.play('relic'); world.burst((k === 'sky' ? skyOrb : grottoOrb).position.clone(), k === 'sky' ? 0x9be7ff : 0xc6a8ff, 160); game.toast(`🔮 You took the Spirit Orb of ${k === 'sky' ? 'Wind' : 'Light'}!`, true); }
+const keepers = KEEPERS.map(k => {
+  const m = makeCharacter(k.look); m.group.position.set(...k.pos); m.group.rotation.y = k.face; scene.add(m.group);
+  phys.add(k.pos[0] - 0.35, k.pos[1], k.pos[2] - 0.35, k.pos[0] + 0.35, k.pos[1] + 1.8, k.pos[2] + 0.35, 'npc');
+  const K = { ...k, m, lbl: mkLabel('npc', ''), idle: 0 };
+  addInteract({ pos: VA(k.pos).setY(k.pos[1] + 1.2), range: 3.4, prio: 1, label: () => `<span class="key">E</span> Talk to ${k.name}`, act: () => talkTo(K) });
+  return K;
+});
+function keeperMarker(k) { const mine = QUESTS.filter(q => q.giver === k.id).map(questStatus); return mine.includes('ready') ? '❓' : mine.includes('available') ? '❗' : ''; }
+// dialogue
+const dlg = { open: false, lines: [], i: 0, who: '', onEnd: null };
+function openDialog(who, lines, onEnd) { Object.assign(dlg, { open: true, lines, i: 0, who, onEnd }); renderDialog(); sfx.play('dialog'); keys.clear(); }
+function renderDialog() { $('dialog').classList.toggle('hidden', !dlg.open); if (!dlg.open) return; $('dialog').innerHTML = `<div class="dname">${esc(dlg.who)}</div><div class="dtext">${esc(dlg.lines[dlg.i])}</div><div class="dnext"><span class="key">E</span> ${dlg.i < dlg.lines.length - 1 ? 'Continue' : 'Close'} <span style="opacity:.6">(${dlg.i + 1}/${dlg.lines.length})</span></div>`; }
+function advanceDialog() { dlg.i++; sfx.play('dialog'); if (dlg.i >= dlg.lines.length) { dlg.open = false; renderDialog(); const f = dlg.onEnd; dlg.onEnd = null; if (f) f(); } else renderDialog(); }
+function talkTo(k) {
+  const mine = QUESTS.filter(q => q.giver === k.id);
+  const ready = mine.find(q => questStatus(q) === 'ready'), avail = mine.find(q => questStatus(q) === 'available'), act = mine.find(q => questStatus(q) === 'active');
+  if (ready) return openDialog(k.name, ready.turnIn, () => completeQuest(ready));
+  if (avail) return openDialog(k.name, avail.intro, () => { QS.q[avail.id] = 'active'; saveQuests(); sfx.play('quest'); game.toast(`📜 New quest: ${avail.name}`, true); renderQuestUI(true); });
+  if (act) return openDialog(k.name, [`How goes “${act.name}”? ${curStep(act).text}.`]);
+  const lines = IDLE_LINES[k.id]; openDialog(k.name, [lines[k.idle++ % lines.length]]);
+}
+function completeQuest(q) {
+  QS.q[q.id] = 'done'; saveQuests(); sfx.play('finish');
+  const r = q.reward || {}; for (const k of RES) game.inventory[k] += r[k] || 0; renderInventory();
+  game.toast(`✅ Quest complete: ${q.name}${Object.keys(r).length ? ' — ' + RES.filter(k => r[k]).map(k => r[k] + RES_ICON[k]).join(' ') : ''}`, true);
+  if (q.unlock) { setTimeout(() => game.toast('🎁 Unlocked: Keeper’s Circlet hat & Starlight Glider', true), 1600); for (let i = 0; i < 8; i++) setTimeout(() => world.burst(player.pos.clone().add(new V3((Math.random() - 0.5) * 10, 6 + Math.random() * 6, (Math.random() - 0.5) * 10)), [0xffd54f, 0x9be7ff, 0xc6a8ff, 0xff8fb1][i % 4], 150), i * 250); }
+  renderQuestUI(true);
+}
+// quest HUD: tracker, log (J), step-complete notices, compass hints
+const stepSeen = {};
+let qTick = 0;
+function renderQuestUI(force) {
+  const act = QUESTS.filter(q => ['active', 'ready'].includes(questStatus(q)));
+  $('questTracker').classList.toggle('hidden', !act.length);
+  $('questTracker').innerHTML = '<h3>Quests <span class="key">J</span></h3>' + act.slice(0, 3).map(q => { const st = questStatus(q) === 'ready' ? `Return to ${KEEPERS.find(k => k.id === q.giver).name}` : curStep(q).text; return `<div class="qt"><b>${q.name}</b><br>▸ ${st}</div>`; }).join('');
+  if (!$('questLog').classList.contains('hidden') || force) $('questLog').innerHTML = '<h2>Quest Log</h2>' + QUESTS.map(q => { const s = questStatus(q); if (s === 'locked') return `<div class="ql locked">🔒 ???</div>`; const icon = s === 'done' ? '✅' : s === 'ready' ? '❓' : s === 'available' ? '❗' : '📜'; return `<div class="ql ${s}">${icon} <b>${q.name}</b> <span class="qg">— ${KEEPERS.find(k => k.id === q.giver).name}</span>${s === 'available' ? '<div class="qs">Talk to the keeper to begin.</div>' : s === 'done' ? '' : q.steps.map(st => `<div class="qs">${st.done() ? '✔' : '○'} ${st.text}</div>`).join('')}</div>`; }).join('') + '<div class="qfoot">🔮 Spirit Orbs: ' + (QS.orbs.sky ? 'Wind ✔ ' : 'Wind ○ ') + (QS.orbs.grotto ? 'Light ✔' : 'Light ○') + ' · Press J to close</div>';
+}
+function questUpdate(dt) {
+  game.realm = realmAt(player.pos);
+  qTick -= dt;
+  if (qTick <= 0) {
+    qTick = 0.3;
+    for (const q of QUESTS) if (QS.q[q.id] === 'active') q.steps.forEach((st, i) => { const k = q.id + i, d = st.done(); if (d && stepSeen[k] === false) { game.toast(`✔ ${st.text}`); sfx.play('calib'); } stepSeen[k] = d; });
+    renderQuestUI();
+  }
+  for (const k of keepers) {
+    const d = xzDist(player.pos, k.m.group.position), want = d < 7 ? Math.atan2(player.pos.x - k.pos[0], player.pos.z - k.pos[2]) : k.face;
+    k.m.group.rotation.y = lerpAngle(k.m.group.rotation.y, want, Math.min(1, dt * 4)); animateCharacter(k.m, 'IDLE', dt, d < 4 && dlg.open && dlg.who === k.name ? 1 : 0);
+    const mk = keeperMarker(k); k.lbl.innerHTML = `${mk ? `<span class="mk">${mk}</span><br>` : ''}${k.name}`; place(k.lbl, k.m.group.position.clone().add(new V3(0, 2.6, 0)), d < 60);
+  }
+}
+function questCompass(put, bear) {
+  for (const q of QUESTS) { const s = questStatus(q); if (s !== 'active' && s !== 'ready') continue; const w = s === 'ready' ? KEEPERS.find(k => k.id === q.giver).pos : curStep(q).where; if (!w) continue; const p = VA(w); if (p.distanceTo(player.pos) < 600) put('q' + q.id, 'quest', '❗', bear(p)); }
+  for (const k of keepers) if (keeperMarker(k) && k.m.group.position.distanceTo(player.pos) < 600) put('k' + k.id, 'quest', keeperMarker(k), bear(k.m.group.position));
+}
+
+// ---------- applying shared puzzle state (all peers) ----------
+function applyPuzzleState(id, raw) {
+  if (!Object.hasOwn(game.puzzles, id)) return;
+  const prev = game.puzzles[id], s = sanitizePuzzle(id, raw); game.puzzles[id] = s;
+  if (id === 'chimes') {
+    if (s.n !== prev.n) {
+      if (s.hit) chimeFlash(s.hit.i, s.hit.ok);
+      if (s.phase === 'show' && (prev.phase !== 'show' || s.round !== prev.round)) playMelody(s.seq, CHIME_LEN[s.round]);
+      if (s.phase === 'input' && prev.phase === 'show') game.toast(`🎵 Your turn — ring the ${CHIME_LEN[s.round]} chimes in order`);
+      if (s.phase === 'wait') game.toast(`🎶 Song ${s.round - 1} of 3 complete!`);
+      if (s.phase === 'fail') game.toast('🎵 Not quite — listen again…');
+    }
+    if (s.solved && !prev.solved && game.playing) { sfx.play('restore'); world.burst(CHP.clone().setY(3), 0x7ff0ff, 200); game.toast('🌀 The Songbird Stone sings! The Sky Portal has awoken.', true); }
+  } else if (id === 'plates') {
+    s.pressed.forEach((p, i) => { if (p && !prev.pressed[i] && game.playing) sfx.play('plate'); });
+    if (s.solved && !prev.solved) { doorCol.enabled = false; world.tween(2.2, k => doorMesh.position.y = 2.1 - k * 4.3); if (game.playing) { sfx.play('door'); game.toast('🚪 The Root Vault rumbles open!', true); } }
+    if (s.solved) doorCol.enabled = false;
+    if (s.key && !prev.key && game.playing) { sfx.play('relic'); game.toast('🗝️ The Grotto Key is claimed — the violet portal glows!', true); world.burst(keyGroup.position.clone(), 0xffd54f, 120); }
+  } else if (id === 'mirrors') {
+    if (s.n !== prev.n && game.playing) sfx.play('rotate');
+    drawBeams();
+    if (s.solved && !prev.solved && game.playing) { sfx.play('restore'); game.toast('✨ Both receivers blaze with light — the Spirit Orb appears!', true); world.burst(G0.clone().setY(2), 0xffe08a, 220); }
+  }
+}
+function applyPuzzleAll(P) { for (const id of Object.keys(game.puzzles)) applyPuzzleState(id, P && P[id] ? P[id] : game.puzzles[id]); if (game.puzzles.plates.solved) { doorCol.enabled = false; doorMesh.position.y = -2.2; } }
+function puzzleSend(id, a, extra = {}) { game.net.send({ t: 'PUZZLE', id, a, ...extra }); }
+
+// ---------- per-frame visuals ----------
+function puzzleVisuals(dt) {
+  const t = world.time, P = game.puzzles;
+  for (const c of chimes) { c.glow = Math.max(0, c.glow - dt * 1.6); c.mat.emissiveIntensity = 0.12 + c.glow * 1.6 + (P.chimes.solved ? 0.25 + Math.sin(t * 2 + c.i) * 0.15 : 0); c.crystal.rotation.y += dt * (0.4 + c.glow * 4); }
+  songbird.userData.sing = Math.max(0, (songbird.userData.sing || 0) - dt);
+  songbird.position.y = 1.75 + (songbird.userData.sing > 0 ? Math.abs(Math.sin(t * 10)) * 0.12 : 0); songbird.rotation.y = Math.sin(t * 0.5) * 0.4;
+  songRing.material.emissiveIntensity = P.chimes.solved ? 0.9 : P.chimes.phase === 'input' ? 0.5 + Math.sin(t * 6) * 0.3 : 0.1;
+  P.plates.pressed.forEach((p, i) => { plates[i].mat.emissiveIntensity = P.plates.solved ? 0.9 : p ? 1.2 : 0.05; });
+  P.plates.stones.forEach((st, i) => {
+    const g = stones[i]; let target;
+    if (st.c) { const carrier = st.c === game.net.selfId ? player.pos : (game.remotes.get(st.c) || {}).pos; target = carrier ? carrier.clone().add(new V3(0, 2.15, 0)) : VA(st.p); }
+    else target = VA(st.p);
+    g.position.lerp(target, Math.min(1, dt * 14)); if (g.position.distanceTo(target) > 6) g.position.copy(target);
+  });
+  keyGroup.visible = !P.plates.key; keyGroup.rotation.y += dt * 1.5; keyGroup.position.y = 1.7 + Math.sin(t * 2) * 0.1;
+  mirrors.forEach((m, i) => { const s = P.mirrors.states[i]; const yaw = s === 0 ? Math.PI / 4 : -Math.PI / 4; m.cur = lerpAngle(m.cur, yaw, Math.min(1, dt * 10)); m.g.rotation.y = m.cur; m.lift = lerp(m.lift, s === 2 ? 0.08 : 1, Math.min(1, dt * 8)); m.panel.scale.y = m.lift; m.panel.position.y = 1.0 * m.lift; m.frame.visible = m.lift > 0.5; });
+  sunCrystal.rotation.y += dt * 0.8; prism.rotation.y += dt * 0.6;
+  grottoOrb.visible = P.mirrors.solved && !QS.orbs.grotto; grottoOrb.rotation.y += dt; grottoOrb.position.y = 1.9 + Math.sin(t * 2) * 0.12;
+  skyOrb.visible = !QS.orbs.sky; skyOrb.rotation.y += dt; skyOrb.position.y = SKY_SHRINE.y + 1.9 + Math.sin(t * 2) * 0.12;
+}
+// rehome any pickups that ended up inside the new scenery
+for (const p of world.pickups) if (phys.pointInside(p.pos) || phys.pointInside(p.pos.clone().setY(p.pos.y + 1))) { const top = phys.surfaceY(p.pos.x, p.pos.z, p.pos.y + 12); if (top !== null) { p.pos.y = top + 0.9; p.mesh.position.y = p.pos.y; } }
+world.finalizeStatics();
+applyPuzzleAll(game.puzzles);
+renderQuestUI(true);
+for (const z of zips) addInteract({ pos: z.a.clone().setY(z.a.y - 1.05), range: 3.4, label: () => player.state === 'ZIP' ? null : z.active ? '<span class="key">E</span> Ride the sky-line 🚡' : '🚡 Sky-line dormant — restore the Crown Wind Turbines',
+  act: () => { if (z.active) player.startZip(z); else game.toast('This sky-line is dormant — restore the Crown Wind Turbines to power it.'); } });
+function questInput() {
+  if (pressed.has('KeyJ')) { $('questLog').classList.toggle('hidden'); renderQuestUI(true); }
+  if (dlg.open) { if (pressed.has('KeyE') || pressed.has('Space')) advanceDialog(); pressed.delete('KeyE'); pressed.delete('Space'); }
+}
+
+// =====================================================================
 // MAIN LOOP
 // =====================================================================
 let last = performance.now(), menuT = 0;
@@ -2476,6 +3003,8 @@ function simulate(dt) {
     featureInput();
     for (const ev of player.events.splice(0)) { sfx.play(ev); if (ev === 'respawn') game.toast('🍃 The wind spirits carried you back to safety.'); else if (ev === 'exhausted') game.toast('😮‍💨 Out of stamina! Rest on flat ground.'); }
     featureUpdate(dt, inp);
+    questInput(); questUpdate(dt);
+    if (game.net.isAuthority) puzzleHostTick(game.net);
     updateInteraction();
     updateCamera(dt);
     updateGrappleTarget();
@@ -2496,7 +3025,7 @@ function simulate(dt) {
     r.model.group.position.copy(r.pos); r.model.group.rotation.y = r.yaw; animateCharacter(r.model, r.state, dt, r.emote || 0);
   }
   // sky, sun/moon, lights, wildlife, ambience (day/night + restoration progress)
-  featureWorld(dt);
+  featureWorld(dt); puzzleVisuals(dt); updatePortals(dt);
   sky.position.copy(camera.position);
 }
 requestAnimationFrame(frame);
@@ -2514,7 +3043,7 @@ function saveGame() {
   if (!game.playing || !game.ownsWorld) return;
   const nodes = {}; for (const n of world.nodes.values()) nodes[n.id] = { cur: { ...n.cur }, calib: n.calib, restored: n.restored };
   const p = player.lastSafe;
-  const data = { v: 1, savedAt: Date.now(), tod: +game.tod.toFixed(4), nodes, inventory: { ...game.inventory }, pos: [p.x, p.y, p.z].map(v => +v.toFixed(2)) };
+  const data = { v: 1, savedAt: Date.now(), tod: +game.tod.toFixed(4), puzzles: persistPuzzles(), nodes, inventory: { ...game.inventory }, pos: [p.x, p.y, p.z].map(v => +v.toFixed(2)) };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch (_) { /* storage full / disabled: play on without saving */ }
 }
 let saveTimer = 0;
@@ -2530,6 +3059,7 @@ function loadSaveIntoWorld() {
   }
   const inv = safeRes(s.inventory, 999); for (const k of RES) game.inventory[k] = inv[k] || 0;
   if (Number.isFinite(s.tod)) game.tod = clamp(s.tod, 0, 0.9999);
+  if (s.puzzles && typeof s.puzzles === 'object') applyPuzzleAll(s.puzzles);
   const pos = safeVec(s.pos);
   if (pos) { const v = new V3(pos[0], pos[1] + 0.05, pos[2]); if (v.y > -1 && !phys.overlapAt(v)) player.spawn(v); }
   return true;
@@ -2544,7 +3074,7 @@ function renderSaveInfo() {
   $('saveInfo').innerHTML = `💾 <b>Your spire: ${done}/${NODE_DEFS.length} restored</b> · saved ${timeAgo(Number(s.savedAt) || 0)}<br>` +
     `Carrying ${RES.map(k => (inv[k] || 0) + RES_ICON[k]).join(' ')} · <i>Play Solo</i> and <i>Host Room</i> continue from here. ` +
     '<button class="linkbtn" id="btnReset">Start over</button>';
-  $('btnReset').addEventListener('click', () => { if (confirm('Erase your saved spire and start fresh? This cannot be undone.')) { localStorage.removeItem(SAVE_KEY); renderSaveInfo(); } });
+  $('btnReset').addEventListener('click', () => { if (confirm('Erase your saved spire and start fresh? This cannot be undone.')) { localStorage.removeItem(SAVE_KEY); localStorage.removeItem('canopy-spire-quests'); location.reload(); } });
 }
 
 // =====================================================================
@@ -2574,14 +3104,14 @@ function renderPreview(dt) {
 function disposePreview() { if (!preview.alive) return; preview.alive = false; preview.r.dispose(); preview.r.forceContextLoss(); }
 function renderLookOpts() {
   $('lookOpts').innerHTML = LOOK_KEYS.map(([k, arr, label]) => `<div class="lrow"><span class="lab">${label}</span>` + LOOK_OPTS[arr].map((v, i) => arr === 'hat'
-    ? `<span class="opt${selfLook[k] === i ? ' sel' : ''}${lockedLook(k, i) ? ' locked' : ''}" data-k="${k}" data-i="${i}" title="${lockedLook(k, i) ? `Find ${lockedLook(k, i)} Seed Relics to unlock` : ''}">${lockedLook(k, i) ? '🔒 ' : ''}${v}</span>`
-    : `<span class="sw${selfLook[k] === i ? ' sel' : ''}${lockedLook(k, i) ? ' locked' : ''}" data-k="${k}" data-i="${i}" title="${lockedLook(k, i) ? `Find ${lockedLook(k, i)} Seed Relics to unlock` : ''}" style="background:${v === 'rainbow' ? 'linear-gradient(135deg,#ff5252,#ffd54f,#69db7c,#4dabf7,#da77f2)' : v === 'gold' ? 'linear-gradient(135deg,#fff3b0,#e0a800)' : v}"></span>`).join('') + '</div>').join('')
+    ? `<span class="opt${selfLook[k] === i ? ' sel' : ''}${lockedLook(k, i) ? ' locked' : ''}" data-k="${k}" data-i="${i}" title="${lockedLook(k, i)}">${lockedLook(k, i) ? '🔒 ' : ''}${v}</span>`
+    : `<span class="sw${selfLook[k] === i ? ' sel' : ''}${lockedLook(k, i) ? ' locked' : ''}" data-k="${k}" data-i="${i}" title="${lockedLook(k, i)}" style="background:${v === 'rainbow' ? 'linear-gradient(135deg,#ff5252,#ffd54f,#69db7c,#4dabf7,#da77f2)' : v === 'gold' ? 'linear-gradient(135deg,#fff3b0,#e0a800)' : v === 'starlight' ? 'radial-gradient(circle at 30% 30%,#9fb4ff,#1b2350)' : v}"></span>`).join('') + '</div>').join('')
     + '<div class="lrow"><span class="lab"></span><span class="opt" id="lookRandom">🎲 Randomize</span></div>';
 }
 $('lookOpts').addEventListener('click', e => {
   const t = e.target;
   if (t.id === 'lookRandom') { for (const [k, arr] of LOOK_KEYS) selfLook[k] = Math.floor(Math.random() * LOOK_OPTS[arr].length); }
-  else if (t.dataset && t.dataset.k) { const def = LOOK_KEYS.find(x => x[0] === t.dataset.k), i = Number(t.dataset.i); if (!def || !Number.isInteger(i) || i < 0 || i >= LOOK_OPTS[def[1]].length) return; const lk = lockedLook(def[0], i); if (lk) { $('menuStatus').textContent = `🔒 Find ${lk} Seed Relics in the world to unlock this.`; return; } selfLook[def[0]] = i; if (def[0] === 'g') preview.gliderT = 3; }
+  else if (t.dataset && t.dataset.k) { const def = LOOK_KEYS.find(x => x[0] === t.dataset.k), i = Number(t.dataset.i); if (!def || !Number.isInteger(i) || i < 0 || i >= LOOK_OPTS[def[1]].length) return; const lk = lockedLook(def[0], i); if (lk) { $('menuStatus').textContent = `🔒 ${lk}.`; return; } selfLook[def[0]] = i; if (def[0] === 'g') preview.gliderT = 3; }
   else return;
   selfLook = safeLook(selfLook); renderLookOpts(); rebuildPreview(); saveProfile();
 });

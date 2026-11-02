@@ -145,6 +145,24 @@
   .lbl.bubble{font-size:30px;text-shadow:none;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
   .sw.locked,.opt.locked{opacity:.4;filter:grayscale(.5);cursor:not-allowed}
   input[type=range]{flex:1;accent-color:#45b37c}
+  #questTracker{position:absolute;left:14px;top:132px;width:250px;font-size:13px}
+  #questTracker h3{margin:0 0 4px;font-size:12px;color:#ffe082;text-transform:uppercase;letter-spacing:1px}
+  #questTracker .key{font-size:10px}
+  .qt{margin:5px 0;line-height:1.35}
+  #questLog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(540px,90vw);max-height:72vh;overflow:auto;font-size:14px;padding:18px 22px;background:rgba(16,40,36,.88)}
+  #questLog h2{margin:0 0 8px;color:#b9f6ca}
+  .ql{margin:10px 0}.ql.locked{opacity:.45}.ql.done{opacity:.75}
+  .qs{margin-left:24px;font-size:13px;opacity:.9;margin-top:2px}.qg{opacity:.7;font-size:12px}.qfoot{margin-top:12px;font-size:12px;opacity:.8}
+  #dialog{position:absolute;left:50%;bottom:118px;transform:translateX(-50%);width:min(640px,90vw);padding:14px 20px;background:rgba(255,252,242,.96);color:#21403a;text-shadow:none;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+  .dname{font-weight:bold;color:#2e8b5e;font-size:15px;margin-bottom:4px}
+  .dtext{font-size:16.5px;line-height:1.45}
+  .dnext{text-align:right;font-size:12px;margin-top:8px;opacity:.85}
+  #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .45s;z-index:25}
+  #flash.on{opacity:.95;transition:none}
+  .lbl.npc{font-weight:bold;font-size:13px;background:rgba(0,0,0,.4);padding:2px 9px;border-radius:8px;color:#ffe9b0}
+  .lbl.npc .mk{font-size:24px;filter:drop-shadow(0 0 4px #ffd54f)}
+  .lbl.portal{font-size:13px;font-weight:bold;background:rgba(0,0,0,.45);padding:3px 10px;border-radius:10px}
+  .ci.quest{font-size:15px;filter:drop-shadow(0 0 4px #ffd54f)}
   #netWarn{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);color:#ffcc80}
 </style>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'; object-src 'none'">
@@ -183,6 +201,7 @@
       <b>F</b> / <b>Right-click</b> grapple ring<br>
       <b>Q</b> scanner · <b>E</b> interact<br>
       <b>1/2/3</b> deliver · <b>R</b> calibrate<br>
+      <b>J</b> quest log · talk to Keepers<br>
       <b>T</b> track a node · <b>G</b> ping<br>
       <b>B</b> + <b>1–4</b> emote<br>
       <b>E</b> ride sky-lines 🚡<br>
@@ -204,11 +223,12 @@
     <div class="gfxrow"><label for="volSelPause">Volume</label><input type="range" id="volSelPause" min="0" max="100" step="1"></div>
     <div class="controls">
       <b>WASD</b> move · <b>Shift</b> sprint<br><b>Space</b> jump / glide<br>Walk into walls to <b>climb</b><br><b>X</b> let go · <b>F</b>/<b>RMB</b> grapple<br>
-      <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>T</b> track · <b>G</b> ping · <b>B</b> emote<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
+      <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>T</b> track · <b>G</b> ping · <b>B</b> emote<br><b>J</b> quest log<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
     </div>
   </div>
 </div>
 
+<div id="flash"></div>
 <div id="hud" class="hidden">
   <div id="scanOverlay"></div>
   <div id="labels"></div>
@@ -216,6 +236,9 @@
   <div id="compass"><div id="compassStrip"></div><div id="compassTick"></div></div>
   <div id="courseHud" class="panel hidden"></div>
   <div id="waypoint" class="hidden"></div>
+  <div id="questTracker" class="panel hidden"></div>
+  <div id="questLog" class="panel hidden"></div>
+  <div id="dialog" class="hidden"></div>
   <div id="emoteHint" class="panel hidden"><span class="key">1</span>👋 Wave <span class="key">2</span>🙌 Cheer <span class="key">3</span>💃 Dance <span class="key">4</span>🪑 Sit</div>
   <div id="roomInfo" class="panel"></div>
   <div id="objectives" class="panel"></div>

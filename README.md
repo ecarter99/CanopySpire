@@ -31,6 +31,7 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 | Q | Scanner: nodes, resources, thermals, dormant sky-lines |
 | E | Inspect a node. In the panel: 1/2/3 deliver ⚡/🌱/⚙️, R = calibration minigame |
 | Enter | Chat (emoji quick-buttons) |
+| J | Quest log (talk to Keepers with E) |
 | T | Track the next unrestored node (compass + on-screen waypoint) |
 | G / Middle-click | Ping a spot for everyone ("⚡ here", node names…) |
 | B then 1–4 | Emote: wave, cheer, dance, sit |
@@ -56,6 +57,21 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
   - flowers that grow in as districts are restored.
 
   Static scenery is merged into a few large draw calls to keep it fast.
+
+## Keepers, puzzles & portal realms
+Three Keepers give a five-part quest chain. ❗ means they have a quest, ❓ means it's ready to turn in. Quests show in the tracker (top-left), the log (J) and on the compass.
+
+| Quest | Keeper | What you do |
+|---|---|---|
+| The Songbird Stone | Mossa (by the spawn) | **Chime memory puzzle** in the west plaza: wake the Songbird Stone, then echo its melodies on five chime pillars. There are three rounds of 3/5/7 notes. Opens the **Sky portal**. |
+| Two Hands, One Gate | Brindle (east) | **Pressure-plate vault:** hold all three plates at once, with friends standing on them or by carrying seed-stones (E to lift/set down). Then claim the key inside. Opens the **Grotto portal**. |
+| Light in the Grotto | Aster (Portal Plaza, north) | **Crystal Grotto realm:** rotate seven mirrors so the sunbeam, split by a prism, lights *both* receivers. Take the Spirit Orb of Light. |
+| Winds of the Archipelago | Aster | **Sky Archipelago realm:** a floating-island parkour trial using jumps, a bounce bloom, a thermal and a grapple chain to the summit shrine. Take the Spirit Orb of Wind. |
+| The Keepers' Blessing | Mossa | Bring both orbs back to unlock the **Keeper's Circlet** hat and the **Starlight Glider**. |
+
+- **Shared puzzle state:** puzzle progress and opened portals are shared world state, run by the host and saved with the host's spire, so friends can solve them together and follow through portals.
+- **Per-player progress:** quest progress, Spirit Orbs and the cosmetic unlocks belong to each player.
+- **Rewards:** each quest also grants restoration materials.
 
 ## Things to do besides restoring
 - **Sky-lines:** four ziplines. Two run from the canopy deck down to the outskirts; two more, from the Apex Crown, start running once the Crown Wind Turbines are restored.
@@ -98,7 +114,7 @@ Initial routes up: the stepped pillars west of the spire (climb + rest on top), 
   - scripts only from the same origin, no inline scripts
   - network connections only to the same origin and the PeerJS signalling server (`0.peerjs.com`)
   - no plugins or `<base>` tags
-- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; pings are rate-limited per player and emotes clamped to known values; node IDs are checked against a fixed list; pickup IDs must be in range.
+- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; puzzle actions are validated by the host, including a distance check against the sender's last known position; pings are rate-limited per player and emotes clamped to known values; node IDs are checked against a fixed list; pickup IDs must be in range.
 - **Per-peer rate limits on the host.** Overall messages: 40/s, bursts up to 80. Chat: 1/s, bursts up to 5. A peer that keeps flooding is disconnected.
 - **Room codes** come from `crypto.getRandomValues` (5 characters from a 32-letter alphabet).
 - **Known limits (by design for a friends playtest):**
