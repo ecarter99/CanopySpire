@@ -1,6 +1,6 @@
 # Canopy Spire — Multiplayer Web Prototype
 
-A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160 and PeerJS 1.5.4 are vendored in `public/vendor/`.
+A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160 and PeerJS 1.5.4 are vendored in `public/vendor/`, along with three of Three.js's example add-ons (OutlineEffect, RoundedBoxGeometry, BufferGeometryUtils). The add-ons are unmodified except that their `'three'` import points at the local copy.
 
 ## Run
 ```bash
@@ -34,6 +34,25 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 | H | Help · mouse wheel = camera distance |
 | Esc | Game menu: resume, copy invite link, leave to home screen |
 
+## Look & graphics
+- **Customize your character** on the home screen: outfit, accent, skin, hair, hat (none, straw, cap, flower crown, hood, beanie, goggles) and glider colour, with a live 3D preview. Your look is saved in this browser and shown to everyone in the room.
+- **Graphics** (home screen or Esc menu):
+
+  | Preset | Render scale | Shadows | Ink outlines | Grass |
+  |---|---|---|---|---|
+  | Low | 1x | 1024 | off | sparse |
+  | Medium | up to 1.5x | 2048 | on | medium |
+  | High (default) | 1.25–2x | 4096 | on | dense |
+  | Ultra | 2–3x | 4096 | on | densest |
+
+  Pick a lower preset if the fps counter (bottom-right) is low.
+- Visuals are fully procedural:
+  - generated stone, plaster, wood, paving, roof-tile and grass textures;
+  - rounded geometry; four house styles; wind-blown grass that follows the player;
+  - flowers that grow in as districts are restored.
+
+  Static scenery is merged into a few large draw calls to keep it fast.
+
 ## Saving
 Your spire saves automatically in this browser's localStorage: node progress, carried materials, and your last safe position. It saves every 10 s, after deliveries and restorations, when you open the menu, and when you leave or close the tab.
 - **Play Solo** and **Host Room** continue from your save, so friends who join see your restored spire and help you progress it.
@@ -57,12 +76,12 @@ Initial routes up: the stepped pillars west of the spire (climb + rest on top), 
 
 ## Security
 - **Deploy `public/` only.** It contains no secrets; anyone with the URL can download the client.
-- **Dependencies vendored.** They were checked against npm's published sha512 hashes (three@0.160.0, peerjs@1.5.4). No third-party script hosts at runtime.
+- **Dependencies vendored.** They were checked against npm's published sha512 hashes (three@0.160.0 including its examples, peerjs@1.5.4). No third-party script hosts at runtime.
 - **CSP** (meta tag in `index.html`):
   - scripts only from the same origin, no inline scripts
   - network connections only to the same origin and the PeerJS signalling server (`0.peerjs.com`)
   - no plugins or `<base>` tags
-- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; node IDs are checked against a fixed list; pickup IDs must be in range.
+- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; node IDs are checked against a fixed list; pickup IDs must be in range.
 - **Per-peer rate limits on the host.** Overall messages: 40/s, bursts up to 80. Chat: 1/s, bursts up to 5. A peer that keeps flooding is disconnected.
 - **Room codes** come from `crypto.getRandomValues` (5 characters from a 32-letter alphabet).
 - **Known limits (by design for a friends playtest):**

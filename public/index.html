@@ -17,6 +17,19 @@
   .card input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:2px solid #cfe3d8;font-size:16px;background:#fff;color:#21403a;outline:none}
   .card input:focus{border-color:#45b37c}
   #swatches{display:flex;gap:8px}
+  #menu .card{width:min(660px,94vw);max-height:94vh;overflow:auto;box-sizing:border-box}
+  .lookwrap{display:flex;gap:14px;align-items:flex-start}
+  #preview{width:180px;height:230px;border-radius:14px;background:linear-gradient(180deg,#bfe6ff,#eaf7e4);flex:none}
+  #lookOpts{flex:1;min-width:0}
+  .lrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:4px 0}
+  .lrow .lab{width:54px;font-size:11px;font-weight:bold;color:#3b5d54;text-transform:uppercase;letter-spacing:.6px}
+  .lrow .sw{width:22px;height:22px;border-width:2px}
+  .opt{font-size:12px;padding:3px 8px;border-radius:8px;background:#e6f2ea;cursor:pointer;color:#21403a}
+  .opt:hover{background:#d3eadb} .opt.sel{background:#45b37c;color:#fff}
+  .gfxrow{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .gfxrow label{margin:0}
+  select{padding:6px 10px;border-radius:8px;border:2px solid #cfe3d8;font-size:14px;font-family:inherit;background:#fff;color:#21403a}
+  .pause-card select{flex:1}
   .sw{width:30px;height:30px;border-radius:50%;cursor:pointer;border:3px solid transparent;box-shadow:0 2px 4px rgba(0,0,0,.2)}
   .sw.sel{border-color:#21403a}
   .row{display:flex;gap:10px;margin-top:14px}
@@ -125,9 +138,10 @@
     <div class="tag">Restore the vertical city — together.</div>
     <label>Your name</label>
     <input id="nameInput" maxlength="16" placeholder="Wanderer">
-    <label>Colour</label>
-    <div id="swatches"></div>
+    <label>Your look</label>
+    <div class="lookwrap"><canvas id="preview" width="180" height="230"></canvas><div id="lookOpts"></div></div>
     <div id="saveInfo"></div>
+    <div class="gfxrow"><label for="gfxSel">Graphics</label><select id="gfxSel"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra (sharpest)</option></select></div>
     <div class="row">
       <button id="btnHost">Host Room</button>
       <button id="btnSolo" class="alt2">Play Solo</button>
@@ -159,6 +173,7 @@
     <button id="btnResume">Resume</button>
     <button id="btnInvite" class="alt">Copy invite link</button>
     <button id="btnLeave" class="alt2">Leave to home screen</button>
+    <div class="gfxrow"><label for="gfxSelPause">Graphics</label><select id="gfxSelPause"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra (sharpest)</option></select></div>
     <div class="controls">
       <b>WASD</b> move · <b>Shift</b> sprint<br><b>Space</b> jump / glide<br>Walk into walls to <b>climb</b><br><b>X</b> let go · <b>F</b>/<b>RMB</b> grapple<br>
       <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
