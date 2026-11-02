@@ -163,6 +163,40 @@
   .lbl.npc .mk{font-size:24px;filter:drop-shadow(0 0 4px #ffd54f)}
   .lbl.portal{font-size:13px;font-weight:bold;background:rgba(0,0,0,.45);padding:3px 10px;border-radius:10px}
   .ci.quest{font-size:15px;filter:drop-shadow(0 0 4px #ffd54f)}
+  #hotbar{position:absolute;left:50%;bottom:66px;transform:translateX(-50%);display:flex;gap:6px}
+  #hotbar .slot{position:relative;width:46px;height:46px;border-radius:10px;background:rgba(16,40,36,.6);border:2px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:24px}
+  #hotbar .slot .k{position:absolute;left:4px;top:1px;font-size:10px;opacity:.75;font-weight:bold}
+  #hotbar .slot.locked{opacity:.3;filter:grayscale(1)}
+  #hotbar .slot.sel{border-color:#ffe082;box-shadow:0 0 10px rgba(255,224,130,.7)}
+  #hotbar .slot.on{background:rgba(255,200,90,.45)}
+  #prompt{bottom:124px}
+  #bag{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(640px,94vw);max-height:80vh;display:flex;flex-direction:column;pointer-events:auto;background:rgba(16,40,36,.92);padding:14px 16px;text-shadow:none}
+  .bagtabs{display:flex;gap:8px;margin-bottom:10px}
+  .bagtabs button{padding:7px 14px;font-size:14px;background:#2e5e52;box-shadow:none}
+  .bagtabs button.on{background:#45b37c}
+  .bagbody{overflow:auto;flex:1}
+  #bag h4{margin:8px 0 6px;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#b9f6ca}
+  #bag .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px}
+  #bag .cell{position:relative;background:rgba(255,255,255,.08);border-radius:10px;padding:8px 4px 6px;text-align:center;cursor:default;border:2px solid transparent}
+  #bag .cell[data-equip]{cursor:pointer}
+  #bag .cell.sel{border-color:#ffe082}
+  #bag .cell.empty{opacity:.45}
+  #bag .cell .ic{font-size:26px;display:block}
+  #bag .cell .ct{position:absolute;right:6px;top:4px;font-size:12px;font-weight:bold;color:#ffe082}
+  #bag .cell .nm{font-size:11px;display:block;margin-top:2px;line-height:1.2}
+  #bag .hint{font-size:12px;opacity:.7;margin-top:10px}
+  .recipe{display:flex;align-items:center;gap:12px;padding:8px 10px;margin:6px 0;border-radius:10px;background:rgba(255,255,255,.07)}
+  .recipe .ic{font-size:30px;width:40px;text-align:center}
+  .recipe .rt{flex:1;font-size:13px;line-height:1.45}
+  .recipe .rt small{opacity:.75}
+  .recipe .have{color:#b9f6ca} .recipe .miss{color:#ff9e9e}
+  .recipe button{padding:8px 14px;font-size:14px}
+  .bagfoot{font-size:12px;opacity:.8;margin-top:10px;text-align:center}
+  #bossHud{position:absolute;left:50%;top:54px;transform:translateX(-50%);width:420px;text-align:center;padding:8px 14px}
+  #bossHud .bn{font-weight:bold;color:#ffb3d1}
+  #bossHud .bb{height:10px;border-radius:5px;background:rgba(255,255,255,.15);margin:6px 0;overflow:hidden}
+  #bossHud .bb i{display:block;height:100%;background:linear-gradient(90deg,#b06cff,#ff3d5a);transition:width .4s}
+  #bossHud .bs{font-size:13px}
   #netWarn{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);color:#ffcc80}
 </style>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'; object-src 'none'">
@@ -202,6 +236,8 @@
       <b>Q</b> scanner · <b>E</b> interact<br>
       <b>1/2/3</b> deliver · <b>R</b> calibrate<br>
       <b>J</b> quest log · talk to Keepers<br>
+      <b>I</b> backpack & crafting<br>
+      <b>1–5</b> tools · <b>LMB</b>/<b>V</b> use<br>
       <b>T</b> track a node · <b>G</b> ping<br>
       <b>B</b> + <b>1–4</b> emote<br>
       <b>E</b> ride sky-lines 🚡<br>
@@ -223,7 +259,7 @@
     <div class="gfxrow"><label for="volSelPause">Volume</label><input type="range" id="volSelPause" min="0" max="100" step="1"></div>
     <div class="controls">
       <b>WASD</b> move · <b>Shift</b> sprint<br><b>Space</b> jump / glide<br>Walk into walls to <b>climb</b><br><b>X</b> let go · <b>F</b>/<b>RMB</b> grapple<br>
-      <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>T</b> track · <b>G</b> ping · <b>B</b> emote<br><b>J</b> quest log<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
+      <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>T</b> track · <b>G</b> ping · <b>B</b> emote<br><b>J</b> quest log · <b>I</b> backpack<br><b>1–5</b> tools · <b>LMB</b>/<b>V</b> use<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
     </div>
   </div>
 </div>
@@ -236,6 +272,9 @@
   <div id="compass"><div id="compassStrip"></div><div id="compassTick"></div></div>
   <div id="courseHud" class="panel hidden"></div>
   <div id="waypoint" class="hidden"></div>
+  <div id="bossHud" class="panel hidden"></div>
+  <div id="hotbar"></div>
+  <div id="bag" class="panel hidden"></div>
   <div id="questTracker" class="panel hidden"></div>
   <div id="questLog" class="panel hidden"></div>
   <div id="dialog" class="hidden"></div>

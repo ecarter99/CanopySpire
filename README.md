@@ -32,6 +32,8 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 | E | Inspect a node. In the panel: 1/2/3 deliver ⚡/🌱/⚙️, R = calibration minigame |
 | Enter | Chat (emoji quick-buttons) |
 | J | Quest log (talk to Keepers with E) |
+| I / Tab | Backpack: items & crafting |
+| 1–5 | Select tool · LMB / V = use it |
 | T | Track the next unrestored node (compass + on-screen waypoint) |
 | G / Middle-click | Ping a spot for everyone ("⚡ here", node names…) |
 | B then 1–4 | Emote: wave, cheer, dance, sit |
@@ -72,6 +74,43 @@ Three Keepers give a five-part quest chain. ❗ means they have a quest, ❓ mea
 - **Shared puzzle state:** puzzle progress and opened portals are shared world state, run by the host and saved with the host's spire, so friends can solve them together and follow through portals.
 - **Per-player progress:** quest progress, Spirit Orbs and the cosmetic unlocks belong to each player.
 - **Rewards:** each quest also grants restoration materials.
+
+## Tools, crafting & side quests
+**Backpack (I):**
+- **Items:** every item, with descriptions.
+- **Craft:** combine parts into components and tools.
+
+**Parts:** you gather these as glowing pickups that respawn for each player.
+- 🐚 shells come from the Lagoon.
+- 🪶 feathers come from rooftops and sky isles.
+- 💎 crystals come from the Grotto and Bloomwood.
+- 🌸 moonpetals come from Bloomwood.
+- 🍯 resin comes from the island's trees.
+- 🔩 springs and 🫘 seeds are crafted.
+
+| Tool | Recipe | What it does |
+|---|---|---|
+| 🚿 Watering Can | 2🐚 2⚙️ 1🍯 | Withered sprouts grow into a leaf staircase up the spire, a climbable beanstalk to the solar terrace, and a giant flower. Also waters the Thornheart's roots. |
+| 🏮 Glow Lantern | 2💎 1⚡ 1🍯 | Toggle light. Glyph platforms are only solid near a lit lantern, *anyone's* lantern, so friends can light the way. Wakes moth shrines. |
+| 📯 Wind Horn | 3🪶 1🔩 | Spins wind wheels (opens the Lagoon's coral gate for 20 s). Blow it mid-air for a lift. |
+| 👝 Seed Pouch | 1🍯 2🌱 | Plant 🫘 in fertile soil to grow bounce blooms, permanently and for everyone. |
+| 🔍 Prism Lens | 2💎 1🌸 1⚙️ | Raise it on a beam pad to bend sunlight into the Thornheart's heart. |
+
+**Side quests:** Pip the Tinker (crafting tutorial), Old Fennel (wake her daughter's sprouts), Juniper the Courier ↔ Captain Skerry (a parcel and a reply), Skerry's lost compass (gate + temple bounce puzzle), and Luma the Moth-Scholar (moth shrines, glyph climb, Moon Altar). Rewards include the Captain's Hat and materials.
+
+**New realms** (Portal Plaza):
+- **Tidepool Lagoon** is always open.
+- **Moonlit Bloomwood** opens after either main-island puzzle.
+- **Thornwood Hollow** opens when the Moon Altar wakes.
+
+**The Thornheart (co-op boss — you heal it):**
+1. Water its three roots within 25 s of each other.
+2. Hold two sunbeams on its heart for 3 s. The west pad needs a raised Prism Lens; the east pad takes a lens or the rotatable mirror, so it's solo-able.
+3. Sing back its 6-note song on four flowers spread around the arena.
+
+Jump over the thorn waves it sends out. Healing it grants the Heartwood Seed and unlocks the Heartwood Glider.
+
+Bloomed sprouts, planted blooms, shrines, the altar and the healed Thornheart are shared world state, saved with the host's spire. Items, tools and quest progress belong to each player.
 
 ## Things to do besides restoring
 - **Sky-lines:** four ziplines. Two run from the canopy deck down to the outskirts; two more, from the Apex Crown, start running once the Crown Wind Turbines are restored.
@@ -114,7 +153,7 @@ Initial routes up: the stepped pillars west of the spire (climb + rest on top), 
   - scripts only from the same origin, no inline scripts
   - network connections only to the same origin and the PeerJS signalling server (`0.peerjs.com`)
   - no plugins or `<base>` tags
-- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; puzzle actions are validated by the host, including a distance check against the sender's last known position; pings are rate-limited per player and emotes clamped to known values; node IDs are checked against a fixed list; pickup IDs must be in range.
+- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; puzzle actions are validated by the host, including a distance check against the sender's last known position; pings are rate-limited per player and emotes clamped to known values; tool, world-change and boss actions are validated by the host (tool held, distance, phase); node IDs are checked against a fixed list; pickup IDs must be in range.
 - **Per-peer rate limits on the host.** Overall messages: 40/s, bursts up to 80. Chat: 1/s, bursts up to 5. A peer that keeps flooding is disconnected.
 - **Room codes** come from `crypto.getRandomValues` (5 characters from a 32-letter alphabet).
 - **Known limits (by design for a friends playtest):**
