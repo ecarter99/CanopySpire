@@ -13,7 +13,7 @@ const CFG = {
   GLIDE_FALL: 2.6, GLIDE_SPEED: 9.5,
   STAMINA_MAX: 100, CLIMB_COST: 15, GLIDE_COST: 8, REGEN_DELAY: 1.5, REGEN_RATE: 80,
   THERMAL_LIFT: 34, THERMAL_MAX_VY: 11,
-  GRAPPLE_RANGE: 48, GRAPPLE_SPEED: 30,
+  GRAPPLE_RANGE: 48, GRAPPLE_SPEED: 30, BOUNCE: 21,
   NET_HZ: 20, NET_EPS: 0.05,
   HX: 0.35, H: 1.8, STEP: 0.55,
   PICKUP_RESPAWN: 45, CALIBRATIONS: 3,
@@ -62,7 +62,7 @@ const hexStr = n => '#' + n.toString(16).padStart(6, '0');
 // ---- Network input sanitizers: every value from another peer passes through these before use ----
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{5}$/;
-const STATES = new Set(['IDLE', 'WALK', 'RUN', 'CLIMB', 'GLIDE', 'FALL', 'GRAPPLE']);
+const STATES = new Set(['IDLE', 'WALK', 'RUN', 'CLIMB', 'GLIDE', 'FALL', 'GRAPPLE', 'ZIP']);
 const safeColor = c => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) ? c : '#cccccc';
 const safeName = n => String(n ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 16) || 'Wanderer';
 const safeText = t => String(t ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' ').trim().slice(0, 160);
@@ -73,6 +73,44 @@ const safeVec = p => Array.isArray(p) && p.length === 3 ? p.map(v => safeNum(v, 
 const safeId = id => (typeof id === 'string' && id.length > 0 && id.length <= 64 && /^[\w-]+$/.test(id)) ? id : null;
 const isNodeId = id => typeof id === 'string' && Object.hasOwn(NODE_DEF, id);
 const safeRes = (r, max = 99) => { const o = {}; if (r && typeof r === 'object') for (const k of RES) { const v = safeInt(r[k], 0, max); if (v) o[k] = v; } return o; };
+// ---- Feature sites (shared by world building, gameplay and HUD) ----
+const ZIPLINES = [ // sky-lines always run downhill from a to b
+  { id: 'Z1', a: [28.5, 38.8, -28.5], b: [72, 7.5, -72], needs: null },
+  { id: 'Z2', a: [-20, 38.8, -29.5], b: [-42, 7.5, -90], needs: null },
+  { id: 'Z3', a: [13.5, 81, -13.5], b: [54, 61, -2], needs: 'apex_turbines' },
+  { id: 'Z4', a: [-13.5, 81, 13.5], b: [-76, 7.5, 76], needs: 'apex_turbines' },
+];
+const BOUNCE_PADS = [ // [x, y, z, tier that must have a restored node (null = always)]
+  [14, 0, 50, null], [-24, 0, 44, 0], [40, 0, 28, 0], [-20, 0, -45, 0], [-4, 36, -22, 1], [20, 36, 16, 1], [0, 78, -12.5, 2],
+];
+const RELICS = [
+  { id: 'r1', p: [14, 8.6, 50], hint: 'Floating high above a bounce bloom by the south path' },
+  { id: 'r2', p: [-35, 35.4, -27], hint: 'Atop the tallest western pillar' },
+  { id: 'r3', p: [0, 1.2, 27.5], hint: 'Behind the great waterfall' },
+  { id: 'r4', p: [-106, 1.2, 0], hint: 'Where the western road meets the sea' },
+  { id: 'r5', p: [-20, 54.6, -20], hint: 'Just above a sky anchor over the gardens' },
+  { id: 'r6', p: [55, 96, 18], hint: 'High in the tower thermal' },
+  { id: 'r7', p: [60.6, 59.6, 5.6], hint: 'On the solar tower roof' },
+  { id: 'r8', p: [8, 51.2, 8], hint: 'On the spire’s first setback ledge' },
+  { id: 'r9', p: [4.8, 92.6, 0], hint: 'At the very top of the crown' },
+  { id: 'r10', p: [11, 89.4, -11], hint: 'On top of a wind turbine' },
+  { id: 'r11', zipEnd: 'Z4', hint: 'At the far end of the longest sky-line' },
+  { id: 'r12', p: [-18, 42.6, -28.25], hint: 'On the hydroponic bay’s glass roof' },
+];
+const COURSES = [
+  { id: 'drop', name: 'Canopy Drop', color: 0xffb300, needs: null, face: 'path',
+    rings: [[24, 37.8, 32.5], [25, 36.9, 41.5], [27, 34.4, 50.5], [25, 31.7, 60], [19.5, 28.9, 68.5], [13, 26.1, 76.5], [10, 23.5, 85.5], [13, 20.9, 94.5], [19, 18.3, 102]] }, // tuned to the glide slope (~2.6 m drop per 9.5 m)
+  { id: 'spiral', name: 'Thermal Spiral', color: 0xff7043, needs: 'basal_conduit', face: 'up',
+    rings: [0, 1, 2, 3, 4].map(i => [-48 + Math.cos(i * Math.PI / 2) * 3, 6 + i * 10, 8 + Math.sin(i * Math.PI / 2) * 3]) },
+];
+const FEATURE_RESERVED = (() => { // keep houses & trees out of zipline corridors, pads and ring courses
+  const r = [];
+  for (const z of ZIPLINES) for (let t = 0.4; t <= 1.0001; t += 0.08) r.push([lerp(z.a[0], z.b[0], t), lerp(z.a[2], z.b[2], t), 6]);
+  for (const p of BOUNCE_PADS) if (p[1] === 0) r.push([p[0], p[2], 3.5]);
+  for (const q of COURSES[0].rings.slice(2)) r.push([q[0], q[2], 7]);
+  r.push([-106, 0, 4]);
+  return r;
+})();
 const isMsg = m => m !== null && typeof m === 'object' && !Array.isArray(m) && typeof m.t === 'string';
 
 // =====================================================================
@@ -327,7 +365,7 @@ class Physics {
   resolveV(p, s, res) {
     for (const b of this.boxes) {
       if (!b.enabled || !this.ov(p, b)) continue;
-      if (s < 0) { p.y = b.max.y; res.ground = true; } else { p.y = b.min.y - CFG.H - 0.001; res.ceil = true; }
+      if (s < 0) { p.y = b.max.y; res.ground = true; res.groundBox = b; } else { p.y = b.min.y - CFG.H - 0.001; res.ceil = true; }
     }
   }
 }
@@ -340,8 +378,8 @@ const LOOK_OPTS = {
   accent: ['#ffffff', '#ffe066', '#ff8787', '#74c0fc', '#8ce99a', '#e599f7', '#ffa94d', '#343a40'],
   skin: ['#ffe3cc', '#f6cba8', '#e2ac84', '#c68863', '#8d5a3b', '#5c3a24'],
   hair: ['#2b1d14', '#5a3825', '#a0522d', '#e8c872', '#d9480f', '#f1f3f5', '#7048e8', '#2f9e44'],
-  hat: ['None', 'Straw hat', 'Cap', 'Flower crown', 'Hood', 'Beanie', 'Goggles'],
-  glider: ['#ff7043', '#4dabf7', '#ffd43b', '#69db7c', '#da77f2', '#f8f9fa', '#e64980', '#343a40'],
+  hat: ['None', 'Straw hat', 'Cap', 'Flower crown', 'Hood', 'Beanie', 'Goggles', 'Leaf crown', 'Sprout'],
+  glider: ['#ff7043', '#4dabf7', '#ffd43b', '#69db7c', '#da77f2', '#f8f9fa', '#e64980', '#343a40', 'rainbow', 'gold'],
 };
 const LOOK_KEYS = [['o', 'outfit', 'Outfit'], ['a', 'accent', 'Accent'], ['s', 'skin', 'Skin'], ['h', 'hair', 'Hair'], ['hat', 'hat', 'Hat'], ['g', 'glider', 'Glider']];
 const DEFAULT_LOOK = { o: 0, a: 0, s: 1, h: 1, hat: 1, g: 0 };
@@ -353,9 +391,9 @@ function safeLook(l) {
 const lookColor = l => LOOK_OPTS.outfit[safeLook(l).o];
 function makeCharacter(lookIn) {
   const L = safeLook(lookIn), hx = (k, i) => new THREE.Color(LOOK_OPTS[k][i]).getHex();
-  const outfit = hx('outfit', L.o), accent = hx('accent', L.a), skin = hx('skin', L.s), hair = hx('hair', L.h), gl = hx('glider', L.g);
-  const g = new THREE.Group();
-  const add = (geo, mat, x, y, z, parent = g, rx = 0, ry = 0, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); m.castShadow = true; parent.add(m); return m; };
+  const outfit = hx('outfit', L.o), accent = hx('accent', L.a), skin = hx('skin', L.s), hair = hx('hair', L.h), gv = LOOK_OPTS.glider[L.g];
+  const g = new THREE.Group(), root = new THREE.Group(); g.add(root);
+  const add = (geo, mat, x, y, z, parent = root, rx = 0, ry = 0, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); m.castShadow = true; parent.add(m); return m; };
   const mOut = toon(outfit), mAcc = toon(accent), mSkin = toon(skin), mHair = toon(hair), mDark = toon(0x2b2f36), mBrown = toon(0x7a5232), mPants = toon(0x3d4a5c);
   // torso & tunic
   add(new THREE.CapsuleGeometry(0.26, 0.4, 6, 16), mOut, 0, 1.03, 0);
@@ -399,6 +437,12 @@ function makeCharacter(lookIn) {
     add(new THREE.SphereGeometry(0.29, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), mAcc, 0, 1.68, 0);
     add(new THREE.TorusGeometry(0.27, 0.05, 6, 22), mAcc, 0, 1.73, 0, g, Math.PI / 2);
     add(new THREE.SphereGeometry(0.08, 10, 8), toon(0xffffff), 0, 1.98, 0);
+  } else if (hat === 'Leaf crown') {
+    for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; add(ICO1, toon(i % 2 ? PAL.leaf : PAL.leaf2), Math.cos(a) * 0.25, 1.86, Math.sin(a) * 0.25, root, 0.5, -a, 0).scale.set(0.11, 0.035, 0.07); }
+    add(new THREE.SphereGeometry(0.05, 8, 6), toon(0xffe066, { emissive: 0xffc107, emissiveIntensity: 0.4 }), 0, 1.9, 0.24);
+  } else if (hat === 'Sprout') {
+    add(new THREE.CylinderGeometry(0.018, 0.022, 0.22, 6), toon(PAL.leaf3), 0, 1.98, 0);
+    for (const s of [-1, 1]) add(ICO1, toon(PAL.leaf2), s * 0.09, 2.09, 0, root, 0, 0, s * 0.5).scale.set(0.1, 0.03, 0.06);
   } else if (hat === 'Goggles') {
     add(new THREE.TorusGeometry(0.265, 0.03, 6, 24), mDark, 0, 1.76, 0, g, Math.PI / 2 - 0.25);
     for (const s of [-1, 1]) { add(new THREE.CylinderGeometry(0.075, 0.075, 0.07, 16), toon(PAL.brass), s * 0.1, 1.82, 0.22, g, Math.PI / 2 - 0.4); add(new THREE.CircleGeometry(0.058, 16), toon(0x7fe0e8, { emissive: 0x2aa8b8, emissiveIntensity: 0.3 }), s * 0.1, 1.835, 0.255, g, -0.4); }
@@ -407,7 +451,7 @@ function makeCharacter(lookIn) {
   add(new RoundedBoxGeometry(0.42, 0.46, 0.22, 2, 0.06), mBrown, 0, 1.06, -0.3);
   add(new THREE.CylinderGeometry(0.085, 0.085, 0.5, 14), mAcc, 0, 1.36, -0.32, g, 0, 0, Math.PI / 2);
   // limbs (pivot groups — animated)
-  const limb = (x, y, build) => { const pv = new THREE.Group(); pv.position.set(x, y, 0); g.add(pv); build(pv); return pv; };
+  const limb = (x, y, build) => { const pv = new THREE.Group(); pv.position.set(x, y, 0); root.add(pv); build(pv); return pv; };
   const legs = [-1, 1].map(s => limb(s * 0.13, 0.62, pv => {
     add(new THREE.CapsuleGeometry(0.095, 0.3, 4, 12), mPants, 0, -0.24, 0, pv);
     add(new RoundedBoxGeometry(0.19, 0.16, 0.3, 2, 0.06), mBrown, 0, -0.53, 0.04, pv);
@@ -417,16 +461,20 @@ function makeCharacter(lookIn) {
     add(new THREE.SphereGeometry(0.08, 12, 10), mSkin, 0, -0.45, 0, pv);
   }));
   // paraglider: curved canopy + edge trims + struts
-  const glider = new THREE.Group(); g.add(glider);
+  const glider = new THREE.Group(); root.add(glider);
   const canopy = new THREE.CylinderGeometry(1.35, 1.35, 1.0, 28, 1, true, -1.0, 2.0); canopy.rotateX(-Math.PI / 2); canopy.translate(0, 1.0, 0);
-  add(canopy, toon(gl, { side: THREE.DoubleSide }), 0, 0, 0, glider);
+  let canopyMat;
+  if (gv === 'rainbow') { const pos = canopy.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color(); for (let i = 0; i < pos.count; i++) { c.setHSL(((pos.getX(i) / 1.35) + 1) / 2 * 0.8, 0.85, 0.6, THREE.SRGBColorSpace); col.set([c.r, c.g, c.b], i * 3); } canopy.setAttribute('color', new THREE.BufferAttribute(col, 3)); canopyMat = toon(0xffffff, { side: THREE.DoubleSide, vertexColors: true }); }
+  else if (gv === 'gold') canopyMat = toon(0xffcf40, { side: THREE.DoubleSide, emissive: 0x8a6000, emissiveIntensity: 0.35 });
+  else canopyMat = toon(new THREE.Color(gv).getHex(), { side: THREE.DoubleSide });
+  add(canopy, canopyMat, 0, 0, 0, glider);
   for (const z of [-0.5, 0.5]) { const t = new THREE.TorusGeometry(1.36, 0.035, 6, 28, 2.0); t.rotateZ(Math.PI / 2 - 1.0); t.translate(0, 1.0, z); add(t, mAcc, 0, 0, 0, glider); }
   const stripe = new THREE.CylinderGeometry(1.365, 1.365, 0.18, 28, 1, true, -1.0, 2.0); stripe.rotateX(-Math.PI / 2); stripe.translate(0, 1.0, 0); add(stripe, toon(accent, { side: THREE.DoubleSide }), 0, 0, 0, glider);
   for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.02, 0.02, 0.85, 6), mBrown, s * 0.45, 1.95, 0, glider, 0, 0, -s * 0.5);
   glider.visible = false;
-  return { group: g, legs, arms, glider, t: Math.random() * 10 };
+  return { group: g, root, legs, arms, glider, t: Math.random() * 10 };
 }
-function animateCharacter(c, state, dt) {
+function animateCharacter(c, state, dt, emote = 0) {
   c.t += dt;
   const t = c.t; let lL = 0, lR = 0, aL = 0, aR = 0, aLz = 0.08, aRz = -0.08;
   if (state === 'WALK' || state === 'RUN') { const sw = state === 'RUN' ? 0.95 : 0.6, f = state === 'RUN' ? 13 : 9; const s = Math.sin(t * f) * sw; lL = s; lR = -s; aL = -s * 0.8; aR = s * 0.8; }
@@ -434,8 +482,15 @@ function animateCharacter(c, state, dt) {
   else if (state === 'GLIDE') { aL = aR = -2.95; aLz = 0.25; aRz = -0.25; lL = 0.35; lR = 0.25; }
   else if (state === 'FALL') { aL = aR = -1.1; aLz = 0.9; aRz = -0.9; lL = -0.35; lR = 0.3; }
   else if (state === 'GRAPPLE') { aR = -2.9; aL = -0.4; lL = 0.45; lR = -0.25; }
+  else if (state === 'ZIP') { aL = aR = -3.0; aLz = 0.15; aRz = -0.15; lL = 0.5; lR = 0.3 + Math.sin(t * 3) * 0.1; }
   else { aL = Math.sin(t * 2) * 0.05; aR = -aL; }
+  let ry = 0, ty = 0;
+  if (state === 'IDLE' && emote === 1) { aR = -2.7; aRz = -0.4 + Math.sin(t * 10) * 0.45; }
+  else if (state === 'IDLE' && emote === 2) { aL = aR = -3.0; aLz = 0.35; aRz = -0.35; ty = Math.abs(Math.sin(t * 7)) * 0.18; }
+  else if (state === 'IDLE' && emote === 3) { const b = Math.sin(t * 6); ry = b * 0.55; ty = Math.abs(Math.sin(t * 12)) * 0.08; aL = -1.6 - b * 1.2; aR = -1.6 + b * 1.2; aLz = 0.6; aRz = -0.6; lL = b * 0.4; lR = -b * 0.4; }
+  else if (state === 'IDLE' && emote === 4) { ty = -0.42; lL = lR = -1.45; aL = aR = -0.35; }
   const k = Math.min(1, dt * 16);
+  if (c.root) { c.root.rotation.y = lerp(c.root.rotation.y, ry, k); c.root.position.y = lerp(c.root.position.y, ty, k); }
   c.legs[0].rotation.x = lerp(c.legs[0].rotation.x, lL, k); c.legs[1].rotation.x = lerp(c.legs[1].rotation.x, lR, k);
   c.arms[0].rotation.x = lerp(c.arms[0].rotation.x, aL, k); c.arms[1].rotation.x = lerp(c.arms[1].rotation.x, aR, k);
   c.arms[0].rotation.z = lerp(c.arms[0].rotation.z, aLz, k); c.arms[1].rotation.z = lerp(c.arms[1].rotation.z, aRz, k);
@@ -451,7 +506,7 @@ class World {
     this.nodes = new Map(); this.thermals = {}; this.anchors = []; this.pickups = []; this.waterfalls = {};
     this.tweens = []; this.bursts = []; this.updaters = [];
     this.vib = [0.12, 0.12, 0.12]; this.vibTarget = [0.12, 0.12, 0.12]; this.vibDirty = true;
-    this.plants = [[], [], []]; this.bloomGeos = [[], [], []]; this.statics = new Map(); this.grassMeshes = [];
+    this.plants = [[], [], []]; this.flowerSpots = []; this.bloomGeos = [[], [], []]; this.statics = new Map(); this.grassMeshes = [];
     this.time = 0; this.scanning = false; this.turbineSpeed = 0.15; this.turbineTarget = 0.15; this.rotors = [];
     this.onAllRestored = null;
     this.solarMat = toon(0x3a4256, { emissive: 0x1e5bd8, emissiveIntensity: 0, unique: true });
@@ -555,6 +610,7 @@ class World {
     const ctr = new THREE.OctahedronGeometry(0.05 * s); ctr.translate(0, 0.39 * s, 0); this.addBloom(ctr, tier, x, y, z, 0xffc107);
   }
   flowerPatch(x, y, z, tier, n = 8) {
+    this.flowerSpots.push([x, y, z, tier]);
     const cols = [PAL.blossom, PAL.flower, 0xffffff, 0xb197fc, 0xff7043];
     for (let i = 0; i < n; i++) this.flower(x + (this.rng() - 0.5) * 3.2, y, z + (this.rng() - 0.5) * 3.2, tier, cols[Math.floor(this.rng() * cols.length)], 0.9 + this.rng() * 0.4);
   }
@@ -865,7 +921,7 @@ class World {
       if (i > 1) this.vines(-33, z, Math.max(0, h - 6), h, 1, 0, 0, 2.5);
     }
     // Houses (four styles)
-    const reserved = [[0, 56, 6], [-48, 8, 9], [-44, 28, 6], [-35, 0, 6], [-35, 20, 6], [-35, -20, 6], [55, 0, 12], [55, 16, 8], [45, 0, 10], [8, 52, 6], [0, 0, 36], [30, 47, 6]];
+    const reserved = [[0, 56, 6], [-48, 8, 9], [-44, 28, 6], [-35, 0, 6], [-35, 20, 6], [-35, -20, 6], [55, 0, 12], [55, 16, 8], [45, 0, 10], [8, 52, 6], [0, 0, 36], [30, 47, 6]].concat(FEATURE_RESERVED);
     const clear = (x, z, rad) => { if (Math.abs(x) < 5.5 + rad) return false; if (Math.abs(z) < 4 + rad && Math.abs(x) > 10) return false; if (Math.abs(x) < 34 && Math.abs(z) < 34) return false; for (const [rx, rz, rr] of reserved) if (Math.hypot(x - rx, z - rz) < rr + rad) return false; return true; };
     let placed = 0, tries = 0; const houses = [];
     while (placed < 16 && tries++ < 600) {
@@ -1267,7 +1323,20 @@ class PlayerController {
     if (this.phys.overlapAt(p)) { p.addScaledVector(n, 0.45); if (this.phys.overlapAt(p)) return false; }
     this.pos.copy(p); this.state = 'IDLE'; this.vel.set(-n.x * 2, 0, -n.z * 2); this.grounded = true; this.climbCD = 0.3; return true;
   }
-  startGrapple(a) { this.state = 'GRAPPLE'; this.grapple = { a, t: 0, stuck: 0 }; this.grounded = false; this.events.push('grapple'); }
+  bounceCheck(res) {
+    if (!res.groundBox || res.groundBox.tag !== 'bounce') return false;
+    this.vel.y = CFG.BOUNCE; this.grounded = false; this.state = 'FALL'; this.coyote = 0; this.events.push('bounce'); if (this.onBounce) this.onBounce(res.groundBox); return true;
+  }
+  startZip(z) { this.state = 'ZIP'; this.zip = { z, s: 0, v: Math.max(7, Math.hypot(this.vel.x, this.vel.z) * 0.6) }; this.grapple = null; this.grounded = false; this.events.push('zip'); }
+  updZip(dt, inp) {
+    const Z = this.zip.z, slope = (Z.a.y - Z.b.y) / Z.len, end = Z.len - 0.6;
+    this.zip.v = clamp(this.zip.v + (CFG.GRAVITY * 0.5 * slope - 0.01 * this.zip.v * this.zip.v) * dt, 6, 24);
+    this.zip.s = Math.min(end, this.zip.s + this.zip.v * dt);
+    this.pos.copy(Z.a).addScaledVector(Z.dir, this.zip.s); this.pos.y -= 1.95;
+    this.vel.copy(Z.dir).multiplyScalar(this.zip.v); this.yaw = Math.atan2(Z.dir.x, Z.dir.z);
+    if (this.zip.s >= end || inp.jump || inp.letGo) { this.state = 'FALL'; this.vel.multiplyScalar(0.75); this.vel.y = Math.max(this.vel.y, 2.5); this.zip = null; this.climbCD = 0.3; }
+  }
+  startGrapple(a) { this.zip = null; this.state = 'GRAPPLE'; this.grapple = { a, t: 0, stuck: 0 }; this.grounded = false; this.events.push('grapple'); }
 
   update(dt, inp, camYaw) {
     const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw), rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
@@ -1280,6 +1349,7 @@ class PlayerController {
       case 'CLIMB': this.updClimb(dt, inp); break;
       case 'GLIDE': this.updGlide(dt, inp, mx, mz, mlen); break;
       case 'GRAPPLE': this.updGrapple(dt, inp); break;
+      case 'ZIP': this.updZip(dt, inp); break;
       default: this.updMove(dt, inp, mx, mz, mlen);
     }
     // stamina regen — full refill begins 1.5 s after standing on flat ground
@@ -1288,7 +1358,7 @@ class PlayerController {
       if (this.groundTime >= CFG.REGEN_DELAY) { this.stamina = Math.min(CFG.STAMINA_MAX, this.stamina + CFG.REGEN_RATE * dt); if (this.stamina >= CFG.STAMINA_MAX) this.exhausted = false; }
       this.safeT += dt; if (this.safeT > 0.5) { this.safeT = 0; this.lastSafe.copy(this.pos); }
     } else this.groundTime = 0;
-    if (this.pos.y < -3.5) { this.pos.copy(this.lastSafe); this.pos.y += 0.3; this.vel.set(0, 0, 0); this.state = 'FALL'; this.grapple = null; this.events.push('respawn'); }
+    if (this.pos.y < -3.5) { this.pos.copy(this.lastSafe); this.pos.y += 0.3; this.vel.set(0, 0, 0); this.state = 'FALL'; this.grapple = null; this.zip = null; this.events.push('respawn'); }
   }
   updMove(dt, inp, mx, mz, mlen) {
     const speed = inp.sprint ? CFG.RUN : CFG.WALK;
@@ -1297,12 +1367,13 @@ class PlayerController {
     this.vel.y = Math.max(this.vel.y - CFG.GRAVITY * dt, -50);
     this.coyote = this.grounded ? 0.12 : this.coyote - dt;
     if (inp.jump) {
-      if (this.coyote > 0) { this.vel.y = CFG.JUMP; this.coyote = 0; this.grounded = false; }
+      if (this.coyote > 0) { this.vel.y = CFG.JUMP; this.coyote = 0; this.grounded = false; this.events.push('jump'); }
       else if (this.canUse()) { this.state = 'GLIDE'; this.vel.y = Math.max(this.vel.y, -3); this.events.push('glide'); return; }
     }
     if (mlen > 0.1) this.yaw = lerpAngle(this.yaw, Math.atan2(mx, mz), Math.min(1, 14 * dt));
     const res = this.phys.move(this.pos, this.vel.clone().multiplyScalar(dt), this.grounded);
     this.grounded = res.ground && this.vel.y <= 0;
+    if (this.grounded && this.bounceCheck(res)) return;
     if (res.ground && this.vel.y < 0) this.vel.y = 0;
     if (res.ceil && this.vel.y > 0) this.vel.y = 0;
     if (res.hitX) this.vel.x = 0; if (res.hitZ) this.vel.z = 0;
@@ -1345,7 +1416,7 @@ class PlayerController {
     else { this.drain(CFG.GLIDE_COST * dt); this.vel.y = this.vel.y > -CFG.GLIDE_FALL ? Math.max(-CFG.GLIDE_FALL, this.vel.y - CFG.GRAVITY * 0.6 * dt) : approach(this.vel.y, -CFG.GLIDE_FALL, 25 * dt); }
     const res = this.phys.move(this.pos, this.vel.clone().multiplyScalar(dt), false);
     if (res.ceil && this.vel.y > 0) this.vel.y = 0;
-    if (res.ground) { this.state = 'IDLE'; this.grounded = true; this.vel.y = 0; return; }
+    if (res.ground) { if (this.bounceCheck(res)) return; this.state = 'IDLE'; this.grounded = true; this.vel.y = 0; return; }
     if ((res.hitX || res.hitZ) && mlen > 0.3 && this.climbCD <= 0) { const n = this.findWall(mx, mz); if (n) this.startClimb(n); }
   }
   updGrapple(dt, inp) {
@@ -1444,7 +1515,7 @@ class NetworkManager {
         this.conns.set(id, conn);
         const look = safeLook(m.look); const info = { id, name: safeName(m.name), color: lookColor(look), look, p: [0, 0, 0], r: 0, s: 'IDLE' };
         this.auth.players.set(this.selfId, this.selfInfo());
-        conn.send({ t: 'WELCOME', id, players: [...this.auth.players.values()], world: this.snapshot() });
+        conn.send({ t: 'WELCOME', id, players: [...this.auth.players.values()], world: this.snapshot(), tod: this.game.tod });
         this.auth.players.set(id, info);
         this.broadcast({ t: 'PLAYER_JOIN', id, name: info.name, color: info.color, look: info.look }, id);
         return;
@@ -1472,9 +1543,14 @@ class NetworkManager {
     const A = this.auth; if (!A) return;
     switch (m.t) {
       case 'PLAYER_MOVE': {
-        const p = safeVec(m.p); if (!p) break; const r = safeNum(m.r, -1e3, 1e3, 0), s = safeState(m.s);
+        const p = safeVec(m.p); if (!p) break; const r = safeNum(m.r, -1e3, 1e3, 0), s = safeState(m.s), e = safeInt(m.e, 0, 4);
         const pl = A.players.get(from); if (pl) { pl.p = p; pl.r = r; pl.s = s; }
-        this.broadcast({ t: 'PLAYER_MOVE', id: from, p, r, s }, from); break;
+        this.broadcast({ t: 'PLAYER_MOVE', id: from, p, r, s, e }, from); break;
+      }
+      case 'PING': {
+        const p = safeVec(m.p), now = performance.now(); if (!p) break;
+        A.pingT = A.pingT || new Map(); if (now - (A.pingT.get(from) || 0) < 700) break; A.pingT.set(from, now);
+        this.broadcast({ t: 'PING', id: from, p }); break;
       }
       case 'NODE_DELIVER': {
         if (!isNodeId(m.node)) break;
@@ -1514,10 +1590,10 @@ class NetworkManager {
     this.acc += dt; this.last.t += dt;
     if (this.acc < 1 / CFG.NET_HZ) return; this.acc = 0;
     const pl = this.game.player, L = this.last;
-    const moved = pl.pos.distanceTo(L.p) > CFG.NET_EPS, rot = Math.abs(lerpAngle(L.r, pl.yaw, 1) - L.r) > 0.03, st = pl.state !== L.s;
+    const moved = pl.pos.distanceTo(L.p) > CFG.NET_EPS, rot = Math.abs(lerpAngle(L.r, pl.yaw, 1) - L.r) > 0.03, st = pl.state !== L.s || (pl.emote || 0) !== L.e;
     if (!(moved || rot || st || L.t > 1)) return;
-    L.p.copy(pl.pos); L.r = pl.yaw; L.s = pl.state; L.t = 0;
-    this.send({ t: 'PLAYER_MOVE', p: [+pl.pos.x.toFixed(2), +pl.pos.y.toFixed(2), +pl.pos.z.toFixed(2)], r: +pl.yaw.toFixed(3), s: pl.state });
+    L.p.copy(pl.pos); L.r = pl.yaw; L.s = pl.state; L.e = pl.emote || 0; L.t = 0;
+    this.send({ t: 'PLAYER_MOVE', p: [+pl.pos.x.toFixed(2), +pl.pos.y.toFixed(2), +pl.pos.z.toFixed(2)], r: +pl.yaw.toFixed(3), s: pl.state, e: L.e });
   }
   destroy() { try { this.peer && this.peer.destroy(); } catch (_) {} }
 }
@@ -1585,7 +1661,8 @@ game.toast = (text, big = false) => {
 };
 function playerName(id) { if (typeof id !== 'string') return 'Someone'; if (id === game.net.selfId) return 'You'; const r = game.remotes.get(id); return r ? esc(r.name) : 'Someone'; }
 function renderInventory(bump) {
-  $('inventory').innerHTML = RES.map(k => `<div class="chip${bump === k ? ' bump' : ''}" title="${RES_NAME[k]}">${RES_ICON[k]} ${game.inventory[k]}</div>`).join('');
+  const relicChip = `<div class="chip" title="Seed Relics found">🌰 ${relicsFound()}/${relics.length}</div>`;
+  $('inventory').innerHTML = RES.map(k => `<div class="chip${bump === k ? ' bump' : ''}" title="${RES_NAME[k]}">${RES_ICON[k]} ${game.inventory[k]}</div>`).join('') + relicChip;
   if (bump) setTimeout(() => renderInventory(), 160);
 }
 function renderObjectives() {
@@ -1595,7 +1672,7 @@ function renderObjectives() {
     for (const d of NODE_DEFS.filter(d => d.tier === t)) {
       const n = world.nodes.get(d.id), tot = RES.reduce((a, k) => a + (d.req[k] || 0), 0) + CFG.CALIBRATIONS;
       const have = RES.reduce((a, k) => a + Math.min(n.cur[k], d.req[k] || 0), 0) + n.calib;
-      h += `<div class="obj${n.restored ? ' done' : ''}">${n.restored ? '✅' : TYPE_ICON[d.type]}<span class="nm">${d.name}</span><span class="bar"><i style="width:${(n.restored ? 1 : have / tot) * 100}%;background:${hexStr(TYPE_COLOR[d.type])}"></i></span></div>`;
+      h += `<div class="obj${n.restored ? ' done' : ''}">${n.restored ? '✅' : TYPE_ICON[d.type]}<span class="nm">${game.tracked === d.id ? '📍 ' : ''}${d.name}</span><span class="bar"><i style="width:${(n.restored ? 1 : have / tot) * 100}%;background:${hexStr(TYPE_COLOR[d.type])}"></i></span></div>`;
     }
   }
   const done = [...world.nodes.values()].filter(n => n.restored).length;
@@ -1631,7 +1708,7 @@ function showRegion(t) {
   $('region').innerHTML = `${TIER_NAMES[t]}<small>${TIER_SUB[t]}</small>`; $('region').classList.add('show');
   clearTimeout(ui.regionTimer); ui.regionTimer = setTimeout(() => $('region').classList.remove('show'), 3000);
 }
-$('help').innerHTML = `<b>Controls</b><br><span class="key">WASD</span> move  <span class="key">Shift</span> sprint<br><span class="key">Space</span> jump · again in air = glider<br>Walk into a wall to <b>climb</b> (uses stamina)<br>On wall: <span class="key">Space</span> leap off, <span class="key">W</span>+<span class="key">Space</span> dash up, <span class="key">X</span> let go<br><span class="key">F</span>/<span class="key">RMB</span> grapple to a gold ring<br><span class="key">Q</span> scanner (nodes, resources, thermals)<br><span class="key">E</span> inspect node · <span class="key">1</span><span class="key">2</span><span class="key">3</span> deliver · <span class="key">R</span> calibrate<br><span class="key">Enter</span> chat · <span class="key">H</span> toggle help<br><span class="key">Esc</span> game menu (resume / leave)<br><br><i>Glide into rising thermals to gain height. Restore nodes to bring water, light and greenery back — and to open new routes for everyone.</i>`;
+$('help').innerHTML = `<b>Controls</b><br><span class="key">WASD</span> move  <span class="key">Shift</span> sprint<br><span class="key">Space</span> jump · again in air = glider<br>Walk into a wall to <b>climb</b> (uses stamina)<br>On wall: <span class="key">Space</span> leap off, <span class="key">W</span>+<span class="key">Space</span> dash up, <span class="key">X</span> let go<br><span class="key">F</span>/<span class="key">RMB</span> grapple to a gold ring<br><span class="key">Q</span> scanner (nodes, resources, thermals)<br><span class="key">E</span> inspect node · <span class="key">1</span><span class="key">2</span><span class="key">3</span> deliver · <span class="key">R</span> calibrate<br><span class="key">T</span> track next node · <span class="key">G</span>/<span class="key">MMB</span> ping<br><span class="key">B</span> then <span class="key">1</span>–<span class="key">4</span> emote · <span class="key">E</span> ride sky-lines<br><span class="key">Enter</span> chat · <span class="key">H</span> toggle help<br><span class="key">Esc</span> game menu (resume / leave)<br><br><i>Glide into rising thermals to gain height. Restore nodes to bring water, light and greenery back — and to open new routes for everyone.</i>`;
 const EMOJIS = ['👋', '👍', '🙌', '🎉', '❓', '⚡', '🌱', '⚙️', '💧', '🌉', '🪂', '❤️'];
 $('emojis').innerHTML = EMOJIS.map(e => `<span>${e}</span>`).join('');
 $('emojis').addEventListener('mousedown', e => { if (e.target.tagName === 'SPAN') { e.preventDefault(); game.net.send({ t: 'CHAT', text: e.target.textContent }); } });
@@ -1696,7 +1773,7 @@ game.apply = m => {
   if (!isMsg(m)) return;
   switch (m.t) {
     case 'WELCOME': {
-      const id = safeId(m.id); if (!id) break; game.net.selfId = id;
+      const id = safeId(m.id); if (!id) break; game.net.selfId = id; game.tod = safeNum(m.tod, 0, 0.9999, game.tod);
       const wn = (m.world && m.world.nodes) || {};
       for (const d of NODE_DEFS) { const s = Object.hasOwn(wn, d.id) ? wn[d.id] : null; if (!s) continue; world.setNodeProgress(d.id, s.cur, s.calib); if (s.restored === true) world.restoreNode(d.id, true); }
       for (const pid of Array.isArray(m.world && m.world.taken) ? m.world.taken : []) if (game.validPid(pid)) world.setPickupAvailable(pid, false);
@@ -1705,18 +1782,21 @@ game.apply = m => {
     }
     case 'PLAYER_JOIN': { if (!safeId(m.id) || game.remotes.has(m.id)) break; const nm = safeName(m.name); game.addRemote(m.id, nm, m.color, undefined, undefined, undefined, m.look); chatLine('', '', `${esc(nm)} joined the spire`, true); game.toast(`👋 ${esc(nm)} joined`); break; }
     case 'PLAYER_LEAVE': { const r = game.remotes.get(m.id); if (r) chatLine('', '', `${esc(r.name)} left`, true); game.removeRemote(m.id); break; }
-    case 'PLAYER_MOVE': { const r = game.remotes.get(m.id), p = safeVec(m.p); if (!r || !p) break; r.target.set(p[0], p[1], p[2]); if (r.pos.y < -50) r.pos.copy(r.target); r.tYaw = safeNum(m.r, -1e3, 1e3, r.tYaw); r.state = safeState(m.s); break; }
+    case 'PLAYER_MOVE': { const r = game.remotes.get(m.id), p = safeVec(m.p); if (!r || !p) break; r.target.set(p[0], p[1], p[2]); if (r.pos.y < -50) r.pos.copy(r.target); r.tYaw = safeNum(m.r, -1e3, 1e3, r.tYaw); r.state = safeState(m.s); r.emote = safeInt(m.e, 0, 4); break; }
+    case 'PING': { const p = safeVec(m.p); if (typeof m.id === 'string' && p) showPing(m.id, new V3(p[0], p[1], p[2])); break; }
     case 'NODE_PROGRESS_UPDATE': {
       if (!isNodeId(m.node)) break;
       world.setNodeProgress(m.node, m.cur, m.calib); const res = safeRes(m.res); const calib = world.nodes.get(m.node).calib; renderObjectives(); if (ui.panelNode === m.node) renderNodePanel();
       const nm = NODE_DEF[m.node].name;
       if (Object.keys(res).length) game.toast(`${playerName(m.by)} delivered ${Object.entries(res).map(([k, v]) => v + RES_ICON[k]).join(' ')} → ${nm}`);
+      if (m.by === game.net.selfId && Object.keys(res).length) sfx.play('deliver');
+      if (m.calibrated === true) sfx.play('calib');
       if (m.calibrated === true) game.toast(`🔧 ${playerName(m.by)} calibrated ${nm} (${calib}/${CFG.CALIBRATIONS})`);
       break;
     }
     case 'NODE_RESTORED': {
       if (!isNodeId(m.node)) break; const def = NODE_DEF[m.node];
-      world.restoreNode(m.node); renderObjectives(); if (ui.panelNode === m.node) renderNodePanel();
+      world.restoreNode(m.node); sfx.play('restore'); renderObjectives(); if (ui.panelNode === m.node) renderNodePanel();
       game.toast(`${TYPE_ICON[def.type]} ${def.name} restored!`, true);
       chatLine('', '', `✨ ${playerName(m.by)} completed the ${def.name}.`, true);
       break;
@@ -1725,12 +1805,12 @@ game.apply = m => {
       if (!game.validPid(m.pid)) break;
       const wasAvail = world.pickups[m.pid].available || world.pickups[m.pid].pending;
       world.setPickupAvailable(m.pid, false);
-      if (m.by === game.net.selfId && wasAvail) { const p = world.pickups[m.pid]; game.inventory[p.type]++; renderInventory(p.type); if (ui.panelNode) renderNodePanel(); }
+      if (m.by === game.net.selfId && wasAvail) { const p = world.pickups[m.pid]; game.inventory[p.type]++; sfx.play('pickup', p.type); renderInventory(p.type); if (ui.panelNode) renderNodePanel(); }
       break;
     }
     case 'PICKUP_RESPAWN': if (game.validPid(m.pid)) world.setPickupAvailable(m.pid, true); break;
     case 'REFUND': { const res = safeRes(m.res); for (const k of RES) game.inventory[k] += res[k] || 0; renderInventory(); if (ui.panelNode) renderNodePanel(); break; }
-    case 'CHAT': { const text = safeText(m.text); if (text) chatLine(safeName(m.name), safeColor(m.color), text); break; }
+    case 'CHAT': { const text = safeText(m.text); if (text) { chatLine(safeName(m.name), safeColor(m.color), text); sfx.play('chat'); } break; }
   }
 };
 world.onAllRestored = instant => {
@@ -1757,6 +1837,7 @@ renderer.domElement.addEventListener('mousedown', e => {
   if (!game.playing) return;
   if (document.pointerLockElement !== renderer.domElement) { lockPointer(); return; }
   if (e.button === 2) pressed.add('Grapple');
+  if (e.button === 1) { e.preventDefault(); pressed.add('Ping'); }
 });
 $('btnResume').addEventListener('click', () => lockPointer());
 $('pause').addEventListener('click', e => { if (e.target === $('pause')) lockPointer(); });
@@ -1835,7 +1916,7 @@ function updateMinigame(dt) {
   if (mg.lock <= 0) $('minigame').classList.remove('miss');
   if ((pressed.has('Space') || pressed.has('KeyR')) && mg.lock <= 0) {
     if (x >= mg.zone && x <= mg.zone + mg.w) { game.net.send({ t: 'NODE_CALIBRATE', node: mg.node }); closeMinigame(); }
-    else { mg.lock = 0.7; $('minigame').classList.add('miss'); }
+    else { mg.lock = 0.7; $('minigame').classList.add('miss'); sfx.play('miss'); }
   }
   if (pressed.has('KeyE')) { closeMinigame(); pressed.delete('KeyE'); }
 }
@@ -1849,6 +1930,7 @@ function updateInteraction() {
     if (pressed.has('KeyE')) {
       if (ui.panelNode) { ui.panelNode = null; renderNodePanel(); }
       else if (near) { ui.panelNode = near.id; renderNodePanel(); }
+      else { const z = nearestZip(); if (z) { if (z.active) player.startZip(z); else game.toast('This sky-line is dormant — restore the Crown Wind Turbines to power it.'); } }
     }
     if (ui.panelNode) {
       if (pressed.has('Digit1')) deliver('energy'); if (pressed.has('Digit2')) deliver('bio'); if (pressed.has('Digit3')) deliver('scrap');
@@ -1858,7 +1940,7 @@ function updateInteraction() {
   }
   const pr = $('prompt');
   if (!ui.panelNode && near) { pr.innerHTML = near.restored ? `${TYPE_ICON[near.def.type]} ${near.def.name} — <b style="color:#b9f6ca">Restored</b>` : `<span class="key">E</span> Inspect ${near.def.name}`; pr.classList.remove('hidden'); }
-  else pr.classList.add('hidden');
+  else { const z = !ui.panelNode && player.state !== 'ZIP' && nearestZip(); if (z) { pr.innerHTML = z.active ? '<span class="key">E</span> Ride the sky-line 🚡' : '🚡 Sky-line dormant — restore the Crown Wind Turbines'; pr.classList.remove('hidden'); } else pr.classList.add('hidden'); }
   // pickups
   const c = player.pos.clone(); c.y += 0.9;
   for (const p of world.pickups) if (p.available && !p.pending && p.pos.distanceToSquared(c) < 2.4 * 2.4) { p.pending = true; p.mesh.visible = false; game.net.send({ t: 'PICKUP_TAKE', pid: p.id }); }
@@ -1933,6 +2015,443 @@ function updateHUD() {
 }
 
 // =====================================================================
+// FEATURE PACK — sound & music, compass & tracking, pings, emotes,
+// sky-lines, bounce blooms, day/night, wildlife, seed relics, ring courses
+// =====================================================================
+const store = { get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (_) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} } };
+
+// ---------- 1. Procedural sound & generative music (Web Audio, no files) ----------
+class SoundFX {
+  constructor() { this.ctx = null; this.vol = clamp(Number(store.get('canopy-spire-vol', 0.7)) || 0, 0, 1); this.noteT = 1; this.padT = 3; this.chirpT = 4; this.cricketT = 1; this.stepT = 0; }
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const c = this.ctx = new AC();
+    this.master = c.createGain(); this.master.gain.value = this.vol; this.master.connect(c.destination);
+    this.sfx = c.createGain(); this.sfx.gain.value = 0.9; this.sfx.connect(this.master);
+    this.mus = c.createGain(); this.mus.gain.value = 0.5; this.mus.connect(this.master);
+    const dl = c.createDelay(1.0), fb = c.createGain(), lp = c.createBiquadFilter(); dl.delayTime.value = 0.36; fb.gain.value = 0.38; lp.frequency.value = 2400;
+    this.mus.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(this.master);
+    const len = c.sampleRate * 2, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1; this.noiseBuf = buf;
+    this.wind = this.bed(380, 0.5); this.water = this.bed(1100, 0.35, 'bandpass'); this.rush = this.bed(900, 1.1, 'bandpass');
+  }
+  bed(freq, q, type = 'lowpass') { const c = this.ctx, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(); s.buffer = this.noiseBuf; s.loop = true; f.type = type; f.frequency.value = freq; f.Q.value = q; g.gain.value = 0; s.connect(f); f.connect(g); g.connect(this.master); s.start(); return { g, f }; }
+  setVolume(v) { this.vol = clamp(v, 0, 1); if (this.master) this.master.gain.setTargetAtTime(this.vol, this.ctx.currentTime, 0.05); store.set('canopy-spire-vol', this.vol); }
+  tone(freq, dur = 0.2, o = {}) {
+    if (!this.ctx) return; const c = this.ctx, t = c.currentTime + (o.delay || 0), osc = c.createOscillator(), g = c.createGain(), v = o.vol ?? 0.15;
+    osc.type = o.type || 'sine'; osc.frequency.setValueAtTime(freq, t); if (o.slide) osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.slide), t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + (o.attack || 0.006)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(o.bus || this.sfx); osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  noise(dur = 0.15, o = {}) {
+    if (!this.ctx) return; const c = this.ctx, t = c.currentTime + (o.delay || 0), s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = this.noiseBuf; f.type = o.type || 'bandpass'; f.frequency.setValueAtTime(o.freq || 1000, t); if (o.slide) f.frequency.exponentialRampToValueAtTime(o.slide, t + dur); f.Q.value = o.q ?? 1;
+    g.gain.setValueAtTime(o.vol ?? 0.2, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(this.sfx); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05);
+  }
+  arp(notes, step = 0.07, o = {}) { notes.forEach((n, i) => this.tone(n, o.dur || 0.35, { ...o, delay: (o.delay || 0) + i * step })); }
+  play(name, arg) {
+    if (!this.ctx) return;
+    switch (name) {
+      case 'step': this.noise(0.07, { freq: 260 + Math.random() * 220, type: 'lowpass', vol: 0.09 }); break;
+      case 'climb': this.noise(0.09, { freq: 1400, q: 0.7, vol: 0.05 }); break;
+      case 'jump': this.tone(330, 0.16, { type: 'triangle', slide: 620, vol: 0.09 }); break;
+      case 'land': this.noise(0.18, { freq: 160, type: 'lowpass', vol: Math.min(0.35, 0.12 + (arg || 0) * 0.01) }); break;
+      case 'glide': this.noise(0.55, { freq: 380, slide: 2000, q: 0.6, vol: 0.14 }); this.tone(520, 0.12, { type: 'triangle', vol: 0.05 }); break;
+      case 'grapple': this.tone(1100, 0.28, { type: 'sawtooth', slide: 240, vol: 0.035 }); this.tone(1900, 0.06, { type: 'square', vol: 0.03, delay: 0.28 }); break;
+      case 'zip': this.noise(0.4, { freq: 2600, q: 2, vol: 0.06 }); this.tone(1500, 0.08, { type: 'square', vol: 0.025 }); break;
+      case 'bounce': this.tone(180, 0.38, { slide: 880, vol: 0.18 }); this.tone(360, 0.3, { slide: 1300, type: 'triangle', vol: 0.06, delay: 0.03 }); break;
+      case 'pickup': {
+        const k = arg === 'energy' ? [880, 1319, 1760] : arg === 'bio' ? [523, 659, 784] : [1175, 1568];
+        this.arp(k, 0.055, { type: arg === 'scrap' ? 'square' : arg === 'bio' ? 'triangle' : 'sine', vol: arg === 'scrap' ? 0.035 : 0.09, dur: 0.25 }); break;
+      }
+      case 'deliver': this.tone(196, 0.3, { type: 'triangle', vol: 0.18 }); this.tone(392, 0.3, { vol: 0.1, delay: 0.08 }); break;
+      case 'calib': this.arp([523, 659, 784, 1047], 0.06, { type: 'triangle', vol: 0.1 }); break;
+      case 'miss': this.tone(140, 0.25, { type: 'square', vol: 0.05 }); break;
+      case 'restore': this.arp([392, 523, 659, 784, 1047, 1319], 0.11, { dur: 1.6, vol: 0.1, type: 'triangle' }); this.noise(1.8, { freq: 6000, q: 0.5, vol: 0.05, delay: 0.3 }); break;
+      case 'ping': this.tone(1047, 0.12, { vol: 0.09 }); this.tone(1568, 0.2, { vol: 0.09, delay: 0.1 }); break;
+      case 'chat': this.tone(740, 0.08, { vol: 0.04 }); break;
+      case 'relic': this.arp([784, 988, 1175, 1568, 1976, 2349], 0.08, { dur: 0.9, vol: 0.08 }); this.noise(1.2, { freq: 7000, q: 0.4, vol: 0.04 }); break;
+      case 'ring': this.tone(440 * Math.pow(2, (arg || 0) / 12 * 2), 0.3, { type: 'triangle', vol: 0.12 }); break;
+      case 'finish': this.arp([523, 659, 784, 1047, 784, 1047, 1319], 0.09, { dur: 0.6, type: 'triangle', vol: 0.11 }); break;
+      case 'fail': this.tone(330, 0.35, { slide: 160, type: 'triangle', vol: 0.09 }); break;
+      case 'exhausted': this.tone(240, 0.45, { slide: 120, type: 'triangle', vol: 0.08 }); break;
+      case 'emote': this.tone(660, 0.12, { type: 'triangle', vol: 0.06 }); this.tone(880, 0.14, { type: 'triangle', vol: 0.06, delay: 0.09 }); break;
+      case 'ui': this.tone(900, 0.05, { vol: 0.03 }); break;
+    }
+  }
+  // ambience + music: called every frame with a summary of the scene
+  update(dt, s) {
+    if (!this.ctx) return; const now = this.ctx.currentTime;
+    this.wind.g.gain.setTargetAtTime(0.015 + clamp(s.alt / 110, 0, 1) * 0.11 + (s.speed > 12 ? 0.04 : 0), now, 0.4);
+    this.wind.f.frequency.setTargetAtTime(300 + clamp(s.alt / 100, 0, 1) * 500, now, 0.5);
+    this.rush.g.gain.setTargetAtTime(s.gliding || s.zipping ? 0.02 + s.speed * 0.006 : 0, now, 0.15);
+    this.water.g.gain.setTargetAtTime(s.water * 0.16, now, 0.4);
+    // wildlife ambience
+    this.chirpT -= dt; this.cricketT -= dt;
+    if (s.day > 0.5 && s.vib > 0.35 && this.chirpT <= 0) { this.chirpT = 1.5 + Math.random() * 4 / s.vib; const f = 2400 + Math.random() * 1600, n = 2 + Math.floor(Math.random() * 3); for (let i = 0; i < n; i++) this.tone(f * (1 + Math.random() * 0.15), 0.07, { slide: f * 1.35, vol: 0.022, delay: i * 0.11 }); }
+    if (s.day < 0.4 && this.cricketT <= 0) { this.cricketT = 0.35 + Math.random() * 0.5; for (let i = 0; i < 3; i++) this.noise(0.03, { freq: 4800, q: 8, vol: 0.02, delay: i * 0.06 }); }
+    // generative pentatonic music — density & register grow with restoration
+    if (!s.playing) return;
+    const scale = [261.6, 293.7, 329.6, 392.0, 440.0, 523.3, 587.3, 659.3, 784.0, 880.0];
+    this.noteT -= dt; this.padT -= dt;
+    if (this.noteT <= 0) {
+      this.noteT = lerp(2.6, 1.0, s.progress) * (0.6 + Math.random() * 0.8) * (s.day < 0.4 ? 1.5 : 1);
+      const top = 5 + Math.round(s.progress * 5), n = scale[Math.floor(Math.random() * top)] * (s.day < 0.4 ? 0.5 : 1);
+      this.tone(n, 2.4, { type: 'triangle', vol: 0.035 + s.progress * 0.02, attack: 0.04, bus: this.mus });
+      if (s.progress > 0.4 && Math.random() < 0.35) this.tone(n * 1.5, 1.8, { type: 'sine', vol: 0.02, attack: 0.05, delay: 0.25, bus: this.mus });
+    }
+    if (this.padT <= 0) {
+      this.padT = 7 + Math.random() * 4; const roots = [130.8, 146.8, 174.6, 196.0], r = roots[Math.floor(Math.random() * roots.length)];
+      for (const m of [1, 1.25, 1.5]) this.tone(r * m, 6, { type: 'sine', vol: 0.018 + s.progress * 0.012, attack: 1.5, bus: this.mus });
+    }
+  }
+}
+const sfx = new SoundFX();
+
+// ---------- 5. Sky-lines (ziplines) ----------
+const zips = ZIPLINES.map(z => {
+  const a = new V3(...z.a), b = new V3(...z.b), dir = b.clone().sub(a), len = dir.length(); dir.normalize();
+  const hdir = new V3(dir.x, 0, dir.z).normalize();
+  return { ...z, a, b, dir, hdir, len, active: !z.needs, cable: null, posts: [] };
+});
+(() => {
+  const wood = tmat(1, PAL.wood, TEX.wood), metal = toon(PAL.metal), cableMat = toon(0x3b3b3b);
+  for (const z of zips) {
+    for (const [pt, sgn] of [[z.a, -1], [z.b, 1]]) {
+      const px = pt.x + z.hdir.x * 0.8 * sgn, pz = pt.z + z.hdir.z * 0.8 * sgn, base = phys.surfaceY(px, pz, pt.y) ?? 0, h = pt.y + 0.5 - base;
+      const pole = new THREE.Mesh(cylGeo(0.14, 0.2, h, 10, TEX.wood), wood); pole.position.set(px, base + h / 2, pz); pole.castShadow = true; scene.add(pole);
+      const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.07, 6, 16), metal); wheel.position.set(px, pt.y + 0.1, pz); wheel.rotation.y = Math.atan2(z.hdir.x, z.hdir.z) + Math.PI / 2; scene.add(wheel);
+      const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.45), toon(0x4dd0e1, { side: THREE.DoubleSide })); flag.position.set(px + 0.35, pt.y + 0.9, pz); scene.add(flag);
+      phys.add(px - 0.15, base, pz - 0.15, px + 0.15, base + h, pz + 0.15, 'post');
+      z.posts.push({ x: px, z: pz, top: base + h, flag });
+    }
+    const cg = new THREE.CylinderGeometry(0.035, 0.035, z.len, 6); cg.rotateX(Math.PI / 2);
+    z.cable = new THREE.Mesh(cg, cableMat); z.cable.position.copy(z.a).add(z.b).multiplyScalar(0.5); z.cable.lookAt(z.b); z.cable.visible = z.active; scene.add(z.cable);
+    for (const p of z.posts) p.flag.material = toon(z.active ? 0x4dd0e1 : 0x9e9e9e, { side: THREE.DoubleSide });
+  }
+})();
+function refreshZips() {
+  for (const z of zips) { const on = !z.needs || world.nodes.get(z.needs).restored; if (on === z.active) continue; z.active = on; z.cable.visible = on; for (const p of z.posts) p.flag.material = toon(on ? 0x4dd0e1 : 0x9e9e9e, { side: THREE.DoubleSide }); if (on && game.playing) game.toast('🚡 New sky-lines are running from the Apex Crown!'); }
+}
+function nearestZip() {
+  let best = null, bd = 3.2; const hp = player.pos.clone(); hp.y += 1.95;
+  for (const z of zips) { const d = hp.distanceTo(z.a); if (d < bd) { bd = d; best = z; } }
+  return best;
+}
+
+// ---------- 6. Bounce blooms ----------
+const pads = BOUNCE_PADS.map(([x, y, z, tier]) => {
+  const g = new THREE.Group(); g.position.set(x, y, z); scene.add(g);
+  const stem = new THREE.Mesh(cylGeo(0.35, 0.5, 0.55, 12), tmat(Math.max(0, tier ?? 0), PAL.leaf3)); stem.position.y = 0.27; g.add(stem);
+  const cap = new THREE.Group(); cap.position.y = 0.55; g.add(cap);
+  const disc = new THREE.Mesh(new THREE.SphereGeometry(1.25, 28, 10, 0, Math.PI * 2, 0, Math.PI / 2), toon(0xff7eb3)); disc.scale.y = 0.28; disc.castShadow = true; cap.add(disc);
+  for (let i = 0; i < 10; i++) { const p = new THREE.Mesh(ICO1, toon(i % 2 ? 0xffb3d1 : 0xff5c9a)); const a = i / 10 * Math.PI * 2; p.scale.set(0.55, 0.12, 0.3); p.position.set(Math.cos(a) * 1.3, 0.05, Math.sin(a) * 1.3); p.rotation.y = -a; cap.add(p); }
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 8), toon(0xffe066, { emissive: 0xffc107, emissiveIntensity: 0.3 })); dot.position.y = 0.3; dot.scale.y = 0.5; cap.add(dot);
+  const col = phys.add(x - 1.25, y, z - 1.25, x + 1.25, y + 0.7, z + 1.25, 'bounce');
+  for (const p of world.pickups) if (Math.hypot(p.pos.x - x, p.pos.z - z) < 1.6 && Math.abs(p.pos.y - y) < 2) { p.pos.y = y + 1.6; p.mesh.position.y = p.pos.y; }
+  return { g, cap, col, tier, active: true, squash: 0 };
+});
+function refreshPads() {
+  for (const p of pads) { const on = p.tier === null || world.vibTarget[p.tier] > 0.2; if (on === p.active) continue; p.active = on; p.col.enabled = on; p.g.visible = on; if (on && game.playing) { world.burst(p.g.position.clone().add(new V3(0, 1, 0)), 0xff7eb3, 80); } }
+}
+
+// ---------- 7. Day / night ----------
+game.tod = 0.33; // 0 midnight · 0.25 sunrise · 0.5 noon · 0.75 sunset
+const DAY_LEN = 720; // seconds for a full cycle at day speed (nights pass twice as fast)
+const NIGHT = { top: new THREE.Color(0x0c1a3d), bot: new THREE.Color(0x24375f), sunset: new THREE.Color(0xff9a62) };
+const stars = (() => {
+  const N = 1400, p = new Float32Array(N * 3), r = mulberry32(99);
+  for (let i = 0; i < N; i++) { const u = r() * 2 - 1, th = r() * Math.PI * 2, y = Math.abs(u) * 0.95 + 0.05, s = Math.sqrt(1 - y * y); p[i * 3] = Math.cos(th) * s * 1000; p[i * 3 + 1] = y * 1000; p[i * 3 + 2] = Math.sin(th) * s * 1000; }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  const m = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, map: DOT_TEX, transparent: true, opacity: 0, depthWrite: false, fog: false })); m.frustumCulled = false; scene.add(m); return m;
+})();
+const moon = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'); const gr = g.createRadialGradient(64, 64, 20, 64, 64, 64); gr.addColorStop(0, 'rgba(245,248,255,1)'); gr.addColorStop(0.42, 'rgba(230,238,255,0.95)'); gr.addColorStop(0.5, 'rgba(200,215,255,0.25)'); gr.addColorStop(1, 'rgba(200,215,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), fog: false, depthWrite: false, transparent: true })); s.scale.setScalar(90); scene.add(s); return s; })();
+const fireflies = (() => {
+  const N = 260, pos = new Float32Array(N * 3), seed = [], r = mulberry32(5);
+  for (let i = 0; i < N; i++) seed.push([(r() - 0.5) * 200, 0.6 + r() * 3, (r() - 0.5) * 200, r() * 6.28]);
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const m = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xd4ff7a, size: 0.35, map: DOT_TEX, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending })); m.frustumCulled = false; scene.add(m);
+  return { m, g, pos, seed, N };
+})();
+const winGlass = toon(0x9fe3ea, { emissive: 0x2a7f8a, emissiveIntensity: 0.12 }); // same cached material the windows use
+const WIN_DAY = new THREE.Color(0x2a7f8a), WIN_NIGHT = new THREE.Color(0xffb85c);
+const dayState = { day: 1, sunDir: new V3() };
+function updateDayNight(dt, gp) {
+  const nightish = Math.sin((game.tod - 0.25) * Math.PI * 2) < 0;
+  game.tod = (game.tod + dt / DAY_LEN * (nightish ? 2 : 1)) % 1;
+  const phi = (game.tod - 0.25) * Math.PI * 2, sh = Math.sin(phi);
+  const sunDir = dayState.sunDir.set(Math.cos(phi) * 0.85, sh, 0.45).normalize();
+  const day = smooth(-0.1, 0.18, sh); dayState.day = day;
+  const sunset = clamp(1 - Math.abs(sh) * 4, 0, 1) * smooth(-0.15, 0.05, sh);
+  // sky & fog
+  const top = skyMat.uniforms.top.value, bot = skyMat.uniforms.bottom.value;
+  top.lerpColors(SKY.topDull, SKY.top, gp).lerp(NIGHT.top, 1 - day);
+  bot.lerpColors(SKY.botDull, SKY.bot, gp).lerp(NIGHT.bot, 1 - day).lerp(NIGHT.sunset, sunset * 0.55);
+  scene.fog.color.copy(bot);
+  // lights: sun by day, moon by night
+  const moonDir = sunDir.clone().multiplyScalar(-1); moonDir.y = Math.abs(moonDir.y) + 0.25; moonDir.normalize();
+  const lightDir = day > 0.5 ? sunDir : moonDir;
+  sun.color.setHex(day > 0.5 ? 0xfff1d6 : 0x9fb6ff).lerp(NIGHT.sunset, sunset * 0.5);
+  sun.intensity = day > 0.5 ? (2.0 + gp) * smooth(0.5, 1, day) : 0.55 * smooth(0.5, 0, day);
+  hemi.intensity = lerp(0.32, 0.85 + gp * 0.5, day); amb.intensity = lerp(0.22, 0.35, day);
+  const focus = game.playing ? player.pos : new V3(0, 40, 0);
+  sun.position.copy(focus).addScaledVector(lightDir, 200); sun.target.position.copy(focus);
+  sunSprite.position.copy(camera.position).addScaledVector(sunDir, 900); sunSprite.material.opacity = smooth(-0.08, 0.05, sh);
+  moon.position.copy(camera.position).addScaledVector(moonDir, 900); moon.material.opacity = 1 - day;
+  stars.position.copy(camera.position); stars.material.opacity = (1 - day) * 0.95;
+  // night lights
+  world.lampMat.emissiveIntensity = 0.25 + 0.9 * gp * 0.4 + (1 - day) * 1.6;
+  winGlass.emissive.lerpColors(WIN_DAY, WIN_NIGHT, 1 - day); winGlass.emissiveIntensity = lerp(0.12, 0.75, 1 - day);
+  // fireflies (only where the lower deck has bloomed)
+  const ff = fireflies, op = (1 - day) * clamp(world.vib[0] * 1.3 - 0.15, 0, 1);
+  ff.m.material.opacity = op;
+  if (op > 0.01) { const t = world.time; for (let i = 0; i < ff.N; i++) { const [x, y, z, ph] = ff.seed[i]; ff.pos[i * 3] = x + Math.sin(t * 0.4 + ph) * 2.5; ff.pos[i * 3 + 1] = y + Math.sin(t * 0.9 + ph * 3) * 0.5; ff.pos[i * 3 + 2] = z + Math.cos(t * 0.33 + ph) * 2.5; } ff.g.attributes.position.needsUpdate = true; ff.m.material.size = 0.3 + Math.sin(t * 6) * 0.05; }
+}
+
+// ---------- 8. Wildlife: butterflies by the flowerbeds, birds circling the spire ----------
+const wildlife = (() => {
+  const wing = new THREE.Shape(); wing.moveTo(0, 0); wing.bezierCurveTo(0.05, 0.22, 0.32, 0.26, 0.3, 0.06); wing.bezierCurveTo(0.33, -0.1, 0.1, -0.2, 0, 0);
+  const wl = new THREE.ShapeGeometry(wing, 6), wr = wl.clone(); wr.scale(-1, 1, 1);
+  const bm = noOutline(new THREE.MeshToonMaterial({ gradientMap: GRAD, side: THREE.DoubleSide }));
+  const NB = 42, L = new THREE.InstancedMesh(wl, bm, NB), R = new THREE.InstancedMesh(wr, bm, NB);
+  const cols = [0xffd54f, 0xff8fb1, 0x81d4fa, 0xffffff, 0xff7043, 0xb39ddb], r = mulberry32(31);
+  const spots = world.flowerSpots.length ? world.flowerSpots : [[0, 0, 60, 0]];
+  const bs = [];
+  for (let i = 0; i < NB; i++) { const s = spots[Math.floor(r() * spots.length)]; bs.push({ s, ph: r() * 6.28, rad: 1.5 + r() * 2.5, sp: 0.4 + r() * 0.5, h: 0.6 + r() * 1.8 }); const c = new THREE.Color(cols[i % cols.length]); L.setColorAt(i, c); R.setColorAt(i, c); }
+  for (const m of [L, R]) { m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); }
+  // birds
+  const bw = new THREE.BufferGeometry(); bw.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.25, 0, 0, -0.2, 0.9, 0.05, -0.05], 3)); bw.computeVertexNormals();
+  const bw2 = bw.clone(); bw2.scale(-1, 1, 1);
+  const birdMat = noOutline(new THREE.MeshToonMaterial({ color: 0x3e4a5c, gradientMap: GRAD, side: THREE.DoubleSide }));
+  const NBIRD = 24, BL = new THREE.InstancedMesh(bw, birdMat, NBIRD), BR = new THREE.InstancedMesh(bw2, birdMat, NBIRD), birds = [];
+  for (let i = 0; i < NBIRD; i++) { const flock = i % 3; birds.push({ flock, off: Math.floor(i / 3), ph: r() * 6.28 }); }
+  for (const m of [BL, BR]) { m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); }
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new V3(), p = new V3();
+  return {
+    update(dt, day) {
+      const t = world.time;
+      for (let i = 0; i < NB; i++) {
+        const b = bs[i], [sx, sy, sz, tier] = b.s, vis = day * smooth(0.4, 0.7, world.vib[tier]) > 0.3 && (i / NB) < smooth(0.4, 0.95, world.vib[tier]) * day;
+        const a = t * b.sp + b.ph, x = sx + Math.cos(a) * b.rad + Math.sin(a * 2.3) * 0.6, z = sz + Math.sin(a * 1.3) * b.rad, y = sy + b.h + Math.sin(a * 3.1) * 0.4;
+        const flap = Math.sin(t * 22 + b.ph) * 1.1, yaw = -a * 1.1 + Math.PI / 2, s = vis ? 1 : 0;
+        p.set(x, y, z); sc.set(s, s, s);
+        e.set(0, yaw, flap, 'YXZ'); q.setFromEuler(e); L.setMatrixAt(i, m4.compose(p, q, sc));
+        e.set(0, yaw, -flap, 'YXZ'); q.setFromEuler(e); R.setMatrixAt(i, m4.compose(p, q, sc));
+      }
+      L.instanceMatrix.needsUpdate = R.instanceMatrix.needsUpdate = true;
+      const gp = (world.vib[0] + world.vib[1] + world.vib[2]) / 3, nb = Math.round(NBIRD * clamp(0.3 + gp, 0, 1) * day);
+      for (let i = 0; i < NBIRD; i++) {
+        const b = birds[i], R0 = 45 + b.flock * 22, A = t * (0.12 + b.flock * 0.03) * (b.flock === 1 ? -1 : 1) + b.flock * 2.1 + b.off * 0.05;
+        const x = Math.cos(A) * (R0 + b.off * 1.6) + Math.sin(b.off * 1.7) * 2, z = Math.sin(A) * (R0 + b.off * 1.6), y = 62 + b.flock * 14 + Math.sin(t * 0.7 + b.ph) * 2 + (b.off % 2) * 1.2;
+        const dir = b.flock === 1 ? -1 : 1, yaw = -A - (dir > 0 ? 0 : Math.PI), flap = Math.sin(t * 9 + b.ph) * 0.7, s = i < nb ? 1.5 : 0;
+        p.set(x, y, z); sc.set(s, s, s);
+        e.set(0, yaw, flap, 'YXZ'); q.setFromEuler(e); BL.setMatrixAt(i, m4.compose(p, q, sc));
+        e.set(0, yaw, -flap, 'YXZ'); q.setFromEuler(e); BR.setMatrixAt(i, m4.compose(p, q, sc));
+      }
+      BL.instanceMatrix.needsUpdate = BR.instanceMatrix.needsUpdate = true;
+    },
+  };
+})();
+
+// ---------- 9. Seed relics ----------
+const relics = RELICS.map(d => {
+  let p = d.p ? new V3(...d.p) : null;
+  if (d.zipEnd) { const z = zips.find(z => z.id === d.zipEnd), post = z.posts[1]; p = new V3(post.x, post.top + 1.2, post.z); }
+  const g = new THREE.Group(); g.position.copy(p); scene.add(g);
+  const core = new THREE.Mesh(ICO1, toon(0xffe9a8, { emissive: 0xffb300, emissiveIntensity: 0.55 })); core.scale.set(0.28, 0.38, 0.28); g.add(core);
+  const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.35, 8), toon(PAL.leaf2)); leaf.position.y = 0.42; g.add(leaf);
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.035, 6, 32), noOutline(new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.8 }))); halo.rotation.x = Math.PI / 2; g.add(halo);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: DOT_TEX, color: 0xffe08a, transparent: true, opacity: 0.55, depthWrite: false })); glow.scale.setScalar(2.2); g.add(glow);
+  return { ...d, pos: p, g, halo, found: false };
+});
+const RELIC_UNLOCKS = [[3, 'hat', 7, 'Leaf crown hat'], [6, 'glider', 8, 'Rainbow glider'], [9, 'hat', 8, 'Sprout hat'], [12, 'glider', 9, 'Golden glider']];
+function relicsFound() { return relics.filter(r => r.found).length; }
+(() => { const saved = store.get('canopy-spire-relics', []); if (Array.isArray(saved)) for (const r of relics) if (saved.includes(r.id)) { r.found = true; r.g.visible = false; } })();
+function lockedLook(key, i) { for (const [n, k, idx] of RELIC_UNLOCKS) if (((key === 'hat' && k === 'hat') || (key === 'g' && k === 'glider')) && idx === i) return relicsFound() < n ? n : 0; return 0; }
+function collectRelic(r) {
+  r.found = true; r.g.visible = false; store.set('canopy-spire-relics', relics.filter(x => x.found).map(x => x.id));
+  const n = relicsFound(); sfx.play('relic'); world.burst(r.pos.clone(), 0xffe08a, 140);
+  game.toast(`🌰 Seed Relic found! (${n}/${relics.length})`, true);
+  for (const [need, , , label] of RELIC_UNLOCKS) if (need === n) setTimeout(() => game.toast(`🎁 Unlocked: ${label} — equip it on the home screen`, true), 1800);
+  if (game.net.mode !== 'offline') game.net.send({ t: 'CHAT', text: `🌰 found a Seed Relic (${n}/${relics.length})` });
+  renderInventory();
+}
+
+// ---------- 10. Glide-ring courses ----------
+const courses = COURSES.map(c => {
+  const rings = c.rings.map((pt, i) => {
+    const mat = toon(c.color, { emissive: c.color, emissiveIntensity: 0.2, unique: true, transparent: true, opacity: 0.9 });
+    const m = new THREE.Mesh(new THREE.TorusGeometry(2.3, i === 0 || i === c.rings.length - 1 ? 0.22 : 0.15, 10, 40), mat);
+    m.position.set(...pt); scene.add(m);
+    if (c.face === 'up') m.rotation.x = Math.PI / 2; else { const nxt = c.rings[Math.min(i + 1, c.rings.length - 1)], prv = c.rings[Math.max(i - 1, 0)]; m.lookAt(i < c.rings.length - 1 ? new V3(...nxt) : new V3(2 * pt[0] - prv[0], 2 * pt[1] - prv[1], 2 * pt[2] - prv[2])); }
+    return { m, mat, pos: new V3(...pt) };
+  });
+  return { ...c, rings, active: !c.needs };
+});
+let courseRun = null; // { c, i, t0, last }
+const records = (() => { const r = store.get('canopy-spire-records', {}), out = {}; for (const c of courses) { const v = Number(r && r[c.id]); if (Number.isFinite(v) && v > 0) out[c.id] = v; } return out; })();
+function refreshCourses() { for (const c of courses) { c.active = !c.needs || world.nodes.get(c.needs).restored; for (const r of c.rings) r.m.visible = c.active; } }
+function updateCourses(dt) {
+  const ctr = player.pos.clone(); ctr.y += 0.9; const now = world.time;
+  if (!courseRun) {
+    for (const c of courses) if (c.active && !player.grounded && ctr.distanceTo(c.rings[0].pos) < 2.5) { courseRun = { c, i: 1, t0: now, last: now }; sfx.play('ring', 0); game.toast(`🏁 ${c.name} — fly through the rings!`); break; }
+  } else {
+    const c = courseRun.c, r = c.rings[courseRun.i];
+    if (ctr.distanceTo(r.pos) < 2.8) {
+      courseRun.i++; courseRun.last = now; sfx.play('ring', courseRun.i);
+      if (courseRun.i >= c.rings.length) {
+        const t = now - courseRun.t0, best = records[c.id], pb = !best || t < best;
+        if (pb) { records[c.id] = +t.toFixed(2); store.set('canopy-spire-records', records); }
+        sfx.play('finish'); game.toast(`🏁 ${c.name}: ${t.toFixed(2)}s${pb ? ' — new personal best!' : ` (best ${best.toFixed(2)}s)`}`, true);
+        if (game.net.mode !== 'offline') game.net.send({ t: 'CHAT', text: `🏁 finished ${c.name} in ${t.toFixed(2)}s${pb ? ' (new best!)' : ''}` });
+        courseRun = null;
+      }
+    } else if (now - courseRun.last > 10 || (player.grounded && now - courseRun.t0 > 0.5)) { sfx.play('fail'); game.toast(`${c.name} reset — try again from the first ring`); courseRun = null; }
+  }
+  const t = world.time;
+  for (const c of courses) c.rings.forEach((r, i) => {
+    const next = courseRun && courseRun.c === c ? i === courseRun.i : i === 0, done = courseRun && courseRun.c === c && i < courseRun.i;
+    r.mat.emissiveIntensity = next ? 0.8 + Math.sin(t * 6) * 0.25 : 0.15; r.mat.opacity = done ? 0.25 : next ? 1 : 0.55;
+    r.m.scale.setScalar(next ? 1 + Math.sin(t * 6) * 0.05 : 1);
+  });
+  const hud = $('courseHud');
+  if (courseRun) { hud.classList.remove('hidden'); hud.innerHTML = `🏁 <b>${courseRun.c.name}</b> · ring ${courseRun.i}/${courseRun.c.rings.length - 1} · ${(now - courseRun.t0).toFixed(1)}s${records[courseRun.c.id] ? ` · best ${records[courseRun.c.id].toFixed(2)}s` : ''}`; }
+  else hud.classList.add('hidden');
+}
+
+// ---------- 3. Pings ----------
+const pings = [];
+function castPing() {
+  const o = camera.position.clone(), d = new V3(); camera.getWorldDirection(d); const ray = new THREE.Ray(o, d), hp = new V3();
+  let best = 250, hit = null;
+  for (const b of phys.boxes) { if (!b.enabled || b.box3.containsPoint(o)) continue; if (ray.intersectBox(b.box3, hp)) { const dd = hp.distanceTo(o); if (dd < best) { best = dd; hit = hp.clone(); } } }
+  if (!hit && d.y < -0.01) { const t = -o.y / d.y; if (t > 0 && t < 250) hit = o.clone().addScaledVector(d, t); }
+  return hit;
+}
+function pingLabel(p) {
+  for (const q of world.pickups) if (q.available && q.pos.distanceTo(p) < 3) return `${RES_ICON[q.type]} ${RES_NAME[q.type]} here`;
+  for (const n of world.nodes.values()) if (n.group.position.distanceTo(p) < 5) return `${TYPE_ICON[n.def.type]} ${n.def.name}`;
+  for (const a of world.anchors) if (a.active && a.pos.distanceTo(p) < 4) return '◎ Grapple ring';
+  for (const z of zips) if (z.a.distanceTo(p) < 4) return '🚡 Sky-line';
+  for (const r of relics) if (!r.found && r.pos.distanceTo(p) < 4) return '🌰 Seed Relic!';
+  return 'Over here!';
+}
+function showPing(id, p) {
+  const isSelf = id === game.net.selfId, rem = game.remotes.get(id), color = isSelf ? game.selfColor : rem ? rem.color : '#ffffff', who = isSelf ? 'You' : rem ? esc(rem.name) : 'Someone';
+  const g = new THREE.Group(); g.position.copy(p); scene.add(g);
+  const mat = noOutline(new THREE.MeshBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 14, 10, 1, true), mat); beam.position.y = 7; g.add(beam);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.08, 6, 30), mat); ring.rotation.x = Math.PI / 2; ring.position.y = 0.15; g.add(ring);
+  const label = mkLabel('ping', ''); label.style.setProperty('--c', color);
+  const txt = pingLabel(p);
+  pings.push({ id, g, ring, label, txt, who, color, t: 0, pos: p.clone() });
+  while (pings.length > 8) removePing(pings[0]);
+  sfx.play('ping');
+}
+function removePing(pg) { scene.remove(pg.g); pg.label.remove(); pings.splice(pings.indexOf(pg), 1); }
+function updatePings(dt) {
+  for (const pg of [...pings]) {
+    pg.t += dt; if (pg.t > 9) { removePing(pg); continue; }
+    pg.ring.scale.setScalar(1 + (pg.t * 1.5 % 1) * 1.2); pg.ring.material.opacity = 0.6 * (1 - Math.min(1, pg.t / 9));
+    pg.label.innerHTML = `<b>${pg.who}</b>: ${pg.txt}<br><span>${Math.round(pg.pos.distanceTo(player.pos))}m</span>`;
+    place(pg.label, pg.pos.clone().add(new V3(0, 2.2, 0)), true);
+  }
+}
+
+// ---------- 4. Emotes ----------
+const EMOTES = [null, { k: 'wave', icon: '👋', name: 'Wave' }, { k: 'cheer', icon: '🙌', name: 'Cheer' }, { k: 'dance', icon: '💃', name: 'Dance' }, { k: 'sit', icon: '🪑', name: 'Sit' }];
+player.emote = 0; player.emoteT = 0;
+function startEmote(i) {
+  if (!player.grounded || player.state === 'CLIMB') { game.toast('Find solid ground to emote.'); return; }
+  player.emote = i; player.emoteT = 0; sfx.play('emote'); showBubble(selfBubble, EMOTES[i].icon);
+}
+const selfBubble = { el: mkLabel('bubble', ''), t: 0 };
+function showBubble(b, icon) { b.el.textContent = icon; b.t = 2.5; }
+function updateBubble(b, pos, dt) { b.t -= dt; place(b.el, pos.clone().add(new V3(0, 2.9, 0)), b.t > 0); if (b.t > 0) b.el.style.opacity = Math.min(1, b.t); }
+
+// ---------- 2. Compass & tracking ----------
+game.tracked = null;
+const compassEls = new Map();
+function cmpEl(key, cls, html) { let el = compassEls.get(key); if (!el) { el = document.createElement('span'); el.className = 'ci ' + cls; $('compassStrip').appendChild(el); compassEls.set(key, el); } if (el._h !== html) { el.innerHTML = html; el._h = html; } el._seen = true; return el; }
+function trackNext() {
+  const list = [...world.nodes.values()].filter(n => !n.restored).sort((a, b) => a.group.position.distanceTo(player.pos) - b.group.position.distanceTo(player.pos));
+  if (!list.length) { game.tracked = null; game.toast('Everything is restored — nothing left to track! 🌈'); return; }
+  const i = list.findIndex(n => n.id === game.tracked);
+  game.tracked = i < 0 ? list[0].id : (i + 1 < list.length ? list[i + 1].id : null);
+  sfx.play('ui');
+  game.toast(game.tracked ? `📍 Tracking ${NODE_DEF[game.tracked].name}` : 'Tracking off');
+  renderObjectives();
+}
+function updateCompass() {
+  const f = new V3(); camera.getWorldDirection(f); const head = Math.atan2(f.x, -f.z), W = $('compassStrip').clientWidth || 520, FOVC = Math.PI * 0.62;
+  for (const el of compassEls.values()) el._seen = false;
+  const put = (key, cls, html, bearing) => { let rel = ((bearing - head + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; const el = cmpEl(key, cls, html); const vis = Math.abs(rel) < FOVC / 2; el.style.display = vis ? '' : 'none'; if (vis) { el.style.left = (W / 2 + rel / FOVC * W) + 'px'; el.style.opacity = 1 - Math.abs(rel) / (FOVC / 2) * 0.6; } };
+  const bear = p => Math.atan2(p.x - player.pos.x, -(p.z - player.pos.z));
+  [['N', 0], ['NE', Math.PI / 4], ['E', Math.PI / 2], ['SE', Math.PI * 0.75], ['S', Math.PI], ['SW', -Math.PI * 0.75], ['W', -Math.PI / 2], ['NW', -Math.PI / 4]].forEach(([l, b]) => put('c' + l, l.length > 1 ? 'cdir sm' : 'cdir', l, b));
+  for (const n of world.nodes.values()) if (!n.restored) put('n' + n.id, 'node' + (game.tracked === n.id ? ' trk' : ''), TYPE_ICON[n.def.type], bear(n.group.position));
+  for (const r of game.remotes.values()) if (r.pos.y > -50) put('p' + r.id, 'mate', `<i style="background:${safeColor(r.color)}"></i>`, bear(r.pos));
+  for (const pg of pings) put('g' + pings.indexOf(pg) + pg.id + pg.pos.x.toFixed(0), 'pingc', `<i style="border-color:${safeColor(pg.color)}"></i>`, bear(pg.pos));
+  if (!courseRun) for (const c of courses) if (c.active && c.rings[0].pos.distanceTo(player.pos) < 120) put('k' + c.id, 'course', '🏁', bear(c.rings[0].pos));
+  // needed materials near the player for the tracked node
+  const tn = game.tracked && world.nodes.get(game.tracked);
+  if (tn) {
+    const need = RES.filter(k => (tn.def.req[k] || 0) - tn.cur[k] - game.inventory[k] > 0);
+    world.pickups.filter(p => p.available && need.includes(p.type) && p.pos.distanceTo(player.pos) < 80).sort((a, b) => a.pos.distanceTo(player.pos) - b.pos.distanceTo(player.pos)).slice(0, 4)
+      .forEach(p => put('m' + p.id, 'mat', RES_ICON[p.type], bear(p.pos)));
+  }
+  for (const [k, el] of compassEls) if (!el._seen) { el.remove(); compassEls.delete(k); }
+  // on-screen waypoint for the tracked node
+  const wp = $('waypoint');
+  if (!tn || tn.restored) { if (tn && tn.restored) game.tracked = null; wp.classList.add('hidden'); return; }
+  const target = tn.group.position.clone().add(new V3(0, 4, 0)), v = target.clone().project(camera), behind = v.z > 1;
+  let x = (v.x + 1) / 2 * innerWidth, y = (1 - v.y) / 2 * innerHeight;
+  if (behind) { x = innerWidth - x; y = innerHeight - 40; }
+  x = clamp(x, 60, innerWidth - 60); y = clamp(y, 150, innerHeight - 120);
+  if (x > innerWidth - 320 && y < 420) y = 420;
+  wp.classList.remove('hidden'); wp.style.left = x + 'px'; wp.style.top = y + 'px';
+  const need = RES.filter(k => (tn.def.req[k] || 0) - tn.cur[k] > 0).map(k => `${RES_ICON[k]}${(tn.def.req[k] || 0) - tn.cur[k]}`).join(' ');
+  wp.innerHTML = `<div class="wpd">${TYPE_ICON[tn.def.type]}</div><div class="wpt">${tn.def.name}<br><b>${Math.round(tn.group.position.distanceTo(player.pos))}m</b>${need ? ' · needs ' + need : ' · ready to calibrate'}</div>`;
+}
+
+// ---------- Hooks the main loop calls ----------
+let lastEmoteSent = 0, prevAirVy = 0, wasGrounded = true;
+function featureInput() {
+  if (pressed.has('KeyT')) trackNext();
+  if ((pressed.has('KeyG') || pressed.has('Ping')) && world.time - (game.lastPing || -9) > 0.8) { const p = castPing(); if (p) { game.lastPing = world.time; game.net.send({ t: 'PING', p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)] }); } }
+  if (pressed.has('KeyB') && !ui.panelNode) { ui.emoteOpen = ui.emoteOpen ? 0 : 3; $('emoteHint').classList.toggle('hidden', !ui.emoteOpen); }
+  if (ui.emoteOpen && !ui.panelNode) for (let i = 1; i <= 4; i++) if (pressed.has('Digit' + i)) { startEmote(i); ui.emoteOpen = 0; $('emoteHint').classList.add('hidden'); }
+}
+function featureUpdate(dt, inp) {
+  if (ui.emoteOpen) { ui.emoteOpen = Math.max(0, ui.emoteOpen - dt); if (!ui.emoteOpen) $('emoteHint').classList.add('hidden'); }
+  if (player.emote && (inp.f || inp.r || inp.jump || !player.grounded || player.state !== 'IDLE')) player.emote = 0;
+  // player events → sound
+  for (const ev of player.events) sfx.play(ev);
+  if (player.grounded && !wasGrounded && prevAirVy < -9) sfx.play('land', -prevAirVy);
+  wasGrounded = player.grounded; prevAirVy = player.vel.y;
+  if (player.grounded && (player.state === 'WALK' || player.state === 'RUN')) { sfx.stepT -= dt; if (sfx.stepT <= 0) { sfx.stepT = player.state === 'RUN' ? 0.29 : 0.42; sfx.play('step'); } }
+  else if (player.state === 'CLIMB' && (inp.f || inp.r)) { sfx.stepT -= dt; if (sfx.stepT <= 0) { sfx.stepT = 0.33; sfx.play('climb'); } }
+  // relics
+  const ctr = player.pos.clone(); ctr.y += 0.9;
+  for (const r of relics) if (!r.found && ctr.distanceTo(r.pos) < 2.2) collectRelic(r);
+  updateCourses(dt); updatePings(dt); updateCompass(); updateBubble(selfBubble, player.pos, dt);
+  for (const r of game.remotes.values()) { if (!r.bubble) r.bubble = { el: mkLabel('bubble', ''), t: 0 }; if (r.emote && r.emote !== r.lastEmote) showBubble(r.bubble, EMOTES[r.emote].icon); r.lastEmote = r.emote; updateBubble(r.bubble, r.pos, dt); }
+}
+function featureWorld(dt) { // runs on menu & in game
+  refreshZips(); refreshPads(); refreshCourses();
+  const gp = (world.vib[0] + world.vib[1] + world.vib[2]) / 3;
+  updateDayNight(dt, gp);
+  wildlife.update(dt, dayState.day);
+  for (const p of pads) { p.squash = Math.max(0, p.squash - dt * 3); const s = 1 - Math.sin(p.squash * Math.PI) * 0.35; p.cap.scale.set(1 + (1 - s) * 0.5, s, 1 + (1 - s) * 0.5); }
+  for (const r of relics) if (!r.found) { r.g.rotation.y += dt * 1.2; r.g.position.y = r.pos.y + Math.sin(world.time * 2 + r.pos.x) * 0.15; r.halo.scale.setScalar(1 + Math.sin(world.time * 3) * 0.1); }
+  // ambience summary for the sound engine
+  let water = 0; for (const k in world.waterfalls) { const w = world.waterfalls[k]; if (!w.visible) continue; const d = Math.hypot(player.pos.x - w.position.x, player.pos.z - w.position.z); water = Math.max(water, clamp(1 - d / 45, 0, 1)); }
+  sfx.update(dt, { alt: player.pos.y, speed: player.vel.length(), gliding: player.state === 'GLIDE', zipping: player.state === 'ZIP', water, day: dayState.day, vib: gp, progress: world.globalProgress(), playing: game.playing });
+}
+function onBounce(box) { const p = pads.find(p => p.col === box); if (p) p.squash = 1; }
+player.onBounce = onBounce;
+
+// =====================================================================
 // MAIN LOOP
 // =====================================================================
 let last = performance.now(), menuT = 0;
@@ -1954,13 +2473,15 @@ function simulate(dt) {
     updateMinigame(dt);
     const inp = readInput();
     player.update(dt, inp, cam.yaw);
-    for (const ev of player.events.splice(0)) if (ev === 'respawn') game.toast('🍃 The wind spirits carried you back to safety.'); else if (ev === 'exhausted') game.toast('😮‍💨 Out of stamina! Rest on flat ground.');
+    featureInput();
+    for (const ev of player.events.splice(0)) { sfx.play(ev); if (ev === 'respawn') game.toast('🍃 The wind spirits carried you back to safety.'); else if (ev === 'exhausted') game.toast('😮‍💨 Out of stamina! Rest on flat ground.'); }
+    featureUpdate(dt, inp);
     updateInteraction();
     updateCamera(dt);
     updateGrappleTarget();
     game.net.tick(dt);
     selfModel.group.position.copy(player.pos); selfModel.group.rotation.y = player.yaw;
-    animateCharacter(selfModel, player.state, dt);
+    animateCharacter(selfModel, player.state, dt, player.emote);
     rope.visible = player.state === 'GRAPPLE' && !!player.grapple;
     if (rope.visible) { const a = rope.geometry.attributes.position; a.setXYZ(0, player.pos.x, player.pos.y + 1.5, player.pos.z); a.setXYZ(1, player.grapple.a.pos.x, player.grapple.a.pos.y - 0.9, player.grapple.a.pos.z); a.needsUpdate = true; }
     updateHUD();
@@ -1972,16 +2493,11 @@ function simulate(dt) {
   pressed.clear();
   for (const r of game.remotes.values()) {
     r.pos.lerp(r.target, Math.min(1, dt * 12)); r.yaw = lerpAngle(r.yaw, r.tYaw, Math.min(1, dt * 12));
-    r.model.group.position.copy(r.pos); r.model.group.rotation.y = r.yaw; animateCharacter(r.model, r.state, dt);
+    r.model.group.position.copy(r.pos); r.model.group.rotation.y = r.yaw; animateCharacter(r.model, r.state, dt, r.emote || 0);
   }
-  // sky / light respond to global restoration progress
-  const gp = (world.vib[0] + world.vib[1] + world.vib[2]) / 3;
-  skyMat.uniforms.top.value.lerpColors(SKY.topDull, SKY.top, gp); skyMat.uniforms.bottom.value.lerpColors(SKY.botDull, SKY.bot, gp);
-  scene.fog.color.copy(skyMat.uniforms.bottom.value);
-  hemi.intensity = 0.85 + gp * 0.5; sun.intensity = 2.0 + gp * 1.0;
-  const focus = game.playing ? player.pos : new V3(0, 40, 0);
-  sun.position.copy(focus).addScaledVector(SUN_DIR, 200); sun.target.position.copy(focus);
-  sky.position.copy(camera.position); sunSprite.position.copy(camera.position).addScaledVector(SUN_DIR, 900);
+  // sky, sun/moon, lights, wildlife, ambience (day/night + restoration progress)
+  featureWorld(dt);
+  sky.position.copy(camera.position);
 }
 requestAnimationFrame(frame);
 
@@ -1998,7 +2514,7 @@ function saveGame() {
   if (!game.playing || !game.ownsWorld) return;
   const nodes = {}; for (const n of world.nodes.values()) nodes[n.id] = { cur: { ...n.cur }, calib: n.calib, restored: n.restored };
   const p = player.lastSafe;
-  const data = { v: 1, savedAt: Date.now(), nodes, inventory: { ...game.inventory }, pos: [p.x, p.y, p.z].map(v => +v.toFixed(2)) };
+  const data = { v: 1, savedAt: Date.now(), tod: +game.tod.toFixed(4), nodes, inventory: { ...game.inventory }, pos: [p.x, p.y, p.z].map(v => +v.toFixed(2)) };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch (_) { /* storage full / disabled: play on without saving */ }
 }
 let saveTimer = 0;
@@ -2013,6 +2529,7 @@ function loadSaveIntoWorld() {
     if (ns.restored === true) world.restoreNode(d.id, true);
   }
   const inv = safeRes(s.inventory, 999); for (const k of RES) game.inventory[k] = inv[k] || 0;
+  if (Number.isFinite(s.tod)) game.tod = clamp(s.tod, 0, 0.9999);
   const pos = safeVec(s.pos);
   if (pos) { const v = new V3(pos[0], pos[1] + 0.05, pos[2]); if (v.y > -1 && !phys.overlapAt(v)) player.spawn(v); }
   return true;
@@ -2057,22 +2574,25 @@ function renderPreview(dt) {
 function disposePreview() { if (!preview.alive) return; preview.alive = false; preview.r.dispose(); preview.r.forceContextLoss(); }
 function renderLookOpts() {
   $('lookOpts').innerHTML = LOOK_KEYS.map(([k, arr, label]) => `<div class="lrow"><span class="lab">${label}</span>` + LOOK_OPTS[arr].map((v, i) => arr === 'hat'
-    ? `<span class="opt${selfLook[k] === i ? ' sel' : ''}" data-k="${k}" data-i="${i}">${v}</span>`
-    : `<span class="sw${selfLook[k] === i ? ' sel' : ''}" data-k="${k}" data-i="${i}" style="background:${v}"></span>`).join('') + '</div>').join('')
+    ? `<span class="opt${selfLook[k] === i ? ' sel' : ''}${lockedLook(k, i) ? ' locked' : ''}" data-k="${k}" data-i="${i}" title="${lockedLook(k, i) ? `Find ${lockedLook(k, i)} Seed Relics to unlock` : ''}">${lockedLook(k, i) ? '🔒 ' : ''}${v}</span>`
+    : `<span class="sw${selfLook[k] === i ? ' sel' : ''}${lockedLook(k, i) ? ' locked' : ''}" data-k="${k}" data-i="${i}" title="${lockedLook(k, i) ? `Find ${lockedLook(k, i)} Seed Relics to unlock` : ''}" style="background:${v === 'rainbow' ? 'linear-gradient(135deg,#ff5252,#ffd54f,#69db7c,#4dabf7,#da77f2)' : v === 'gold' ? 'linear-gradient(135deg,#fff3b0,#e0a800)' : v}"></span>`).join('') + '</div>').join('')
     + '<div class="lrow"><span class="lab"></span><span class="opt" id="lookRandom">🎲 Randomize</span></div>';
 }
 $('lookOpts').addEventListener('click', e => {
   const t = e.target;
   if (t.id === 'lookRandom') { for (const [k, arr] of LOOK_KEYS) selfLook[k] = Math.floor(Math.random() * LOOK_OPTS[arr].length); }
-  else if (t.dataset && t.dataset.k) { const def = LOOK_KEYS.find(x => x[0] === t.dataset.k), i = Number(t.dataset.i); if (!def || !Number.isInteger(i) || i < 0 || i >= LOOK_OPTS[def[1]].length) return; selfLook[def[0]] = i; if (def[0] === 'g') preview.gliderT = 3; }
+  else if (t.dataset && t.dataset.k) { const def = LOOK_KEYS.find(x => x[0] === t.dataset.k), i = Number(t.dataset.i); if (!def || !Number.isInteger(i) || i < 0 || i >= LOOK_OPTS[def[1]].length) return; const lk = lockedLook(def[0], i); if (lk) { $('menuStatus').textContent = `🔒 Find ${lk} Seed Relics in the world to unlock this.`; return; } selfLook[def[0]] = i; if (def[0] === 'g') preview.gliderT = 3; }
   else return;
   selfLook = safeLook(selfLook); renderLookOpts(); rebuildPreview(); saveProfile();
 });
+if (lockedLook('hat', selfLook.hat)) selfLook.hat = DEFAULT_LOOK.hat; if (lockedLook('g', selfLook.g)) selfLook.g = DEFAULT_LOOK.g;
 renderLookOpts(); rebuildPreview();
 renderSaveInfo();
+for (const id of ['volSel', 'volSelPause']) { $(id).value = Math.round(sfx.vol * 100); $(id).addEventListener('input', e => { sfx.setVolume(Number(e.target.value) / 100); for (const o of ['volSel', 'volSelPause']) $(o).value = e.target.value; }); }
 if (!window.Peer) { $('btnHost').disabled = $('btnJoin').disabled = true; $('menuStatus').textContent = 'PeerJS could not load — multiplayer unavailable, solo still works.'; }
 function setBusy(b) { for (const id of ['btnHost', 'btnJoin', 'btnSolo']) $(id).disabled = b || (id !== 'btnSolo' && !window.Peer); }
 function beginPlay() {
+  sfx.init();
   game.ownsWorld = false;
   game.selfName = safeName($('nameInput').value); game.selfLook = safeLook(selfLook); game.selfColor = lookColor(game.selfLook);
   saveProfile();

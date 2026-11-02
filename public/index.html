@@ -102,7 +102,7 @@
   #emojis span{cursor:pointer;font-size:20px;background:rgba(255,255,255,.2);border-radius:8px;padding:2px 5px}
   #emojis span:hover{background:rgba(255,255,255,.45)}
   #chatHint{font-size:12px;opacity:.7;margin-top:4px}
-  #toasts{position:absolute;left:50%;top:70px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px}
+  #toasts{position:absolute;left:50%;top:104px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px}
   .toast{padding:7px 16px;border-radius:20px;background:rgba(16,40,36,.65);font-size:15px;animation:tin .3s ease-out;transition:opacity .6s}
   .toast.big{font-size:24px;font-weight:bold;padding:12px 26px;background:linear-gradient(90deg,rgba(46,139,94,.85),rgba(74,163,223,.85))}
   @keyframes tin{from{transform:translateY(-12px);opacity:0}}
@@ -119,10 +119,32 @@
   .lbl.name{font-weight:bold;font-size:14px;background:rgba(0,0,0,.35);padding:1px 8px;border-radius:8px}
   #scanOverlay{position:absolute;inset:0;opacity:0;transition:opacity .35s;background:radial-gradient(ellipse at center,rgba(0,255,220,0) 45%,rgba(0,200,200,.28) 100%),repeating-linear-gradient(0deg,rgba(0,255,230,.05) 0 2px,transparent 2px 5px)}
   body.scanning #scanOverlay{opacity:1}
-  #scanTag{position:absolute;left:50%;top:14px;transform:translateX(-50%);font-weight:bold;letter-spacing:3px;color:#7ff;opacity:0;transition:opacity .3s}
+  #scanTag{position:absolute;left:50%;top:84px;transform:translateX(-50%);font-weight:bold;letter-spacing:3px;color:#7ff;opacity:0;transition:opacity .3s}
   body.scanning #scanTag{opacity:1}
   #help{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:13px;line-height:1.6;width:240px}
   #stateTag{position:absolute;right:14px;bottom:14px;font-size:11px;opacity:.6}
+  #compass{position:absolute;left:50%;top:12px;transform:translateX(-50%);width:520px;height:34px;border-radius:17px;overflow:hidden;background:linear-gradient(90deg,rgba(16,40,36,0),rgba(16,40,36,.55) 18%,rgba(16,40,36,.55) 82%,rgba(16,40,36,0))}
+  #compassStrip{position:absolute;inset:0}
+  #compassTick{position:absolute;left:50%;top:0;width:2px;height:8px;margin-left:-1px;background:#ffe082}
+  .ci{position:absolute;top:50%;transform:translate(-50%,-50%);white-space:nowrap;line-height:1}
+  .ci.cdir{font-weight:bold;font-size:15px;color:#fff}
+  .ci.cdir.sm{font-size:11px;opacity:.7}
+  .ci.node{font-size:15px;filter:grayscale(.2)}
+  .ci.node.trk{font-size:21px;filter:drop-shadow(0 0 6px #ffe082)}
+  .ci.mate i{display:block;width:11px;height:11px;border-radius:50%;border:2px solid #fff}
+  .ci.pingc i{display:block;width:12px;height:12px;border-radius:50%;border:3px solid #fff;background:transparent}
+  .ci.mat{font-size:12px;top:72%}
+  .ci.course{font-size:14px}
+  #courseHud{position:absolute;left:50%;top:54px;transform:translateX(-50%);font-size:15px;padding:5px 14px}
+  #waypoint{position:absolute;transform:translate(-50%,-100%);text-align:center;pointer-events:none}
+  #waypoint .wpd{font-size:22px;filter:drop-shadow(0 0 6px #ffe082)}
+  #waypoint .wpt{font-size:12px;background:rgba(16,40,36,.6);border-radius:8px;padding:2px 8px;margin-top:2px}
+  #emoteHint{position:absolute;left:50%;bottom:132px;transform:translateX(-50%);font-size:15px}
+  .lbl.ping{font-size:12.5px;background:rgba(0,0,0,.45);border:2px solid var(--c);border-radius:10px;padding:3px 9px}
+  .lbl.ping span{opacity:.75}
+  .lbl.bubble{font-size:30px;text-shadow:none;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
+  .sw.locked,.opt.locked{opacity:.4;filter:grayscale(.5);cursor:not-allowed}
+  input[type=range]{flex:1;accent-color:#45b37c}
   #netWarn{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);color:#ffcc80}
 </style>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'; object-src 'none'">
@@ -142,6 +164,7 @@
     <div class="lookwrap"><canvas id="preview" width="180" height="230"></canvas><div id="lookOpts"></div></div>
     <div id="saveInfo"></div>
     <div class="gfxrow"><label for="gfxSel">Graphics</label><select id="gfxSel"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra (sharpest)</option></select></div>
+    <div class="gfxrow"><label for="volSel">Volume</label><input type="range" id="volSel" min="0" max="100" step="1"></div>
     <div class="row">
       <button id="btnHost">Host Room</button>
       <button id="btnSolo" class="alt2">Play Solo</button>
@@ -160,6 +183,10 @@
       <b>F</b> / <b>Right-click</b> grapple ring<br>
       <b>Q</b> scanner · <b>E</b> interact<br>
       <b>1/2/3</b> deliver · <b>R</b> calibrate<br>
+      <b>T</b> track a node · <b>G</b> ping<br>
+      <b>B</b> + <b>1–4</b> emote<br>
+      <b>E</b> ride sky-lines 🚡<br>
+      Land on pink blooms to bounce<br>
       <b>Enter</b> chat · <b>H</b> help<br>
       <b>Esc</b> game menu / leave
     </div>
@@ -174,9 +201,10 @@
     <button id="btnInvite" class="alt">Copy invite link</button>
     <button id="btnLeave" class="alt2">Leave to home screen</button>
     <div class="gfxrow"><label for="gfxSelPause">Graphics</label><select id="gfxSelPause"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra (sharpest)</option></select></div>
+    <div class="gfxrow"><label for="volSelPause">Volume</label><input type="range" id="volSelPause" min="0" max="100" step="1"></div>
     <div class="controls">
       <b>WASD</b> move · <b>Shift</b> sprint<br><b>Space</b> jump / glide<br>Walk into walls to <b>climb</b><br><b>X</b> let go · <b>F</b>/<b>RMB</b> grapple<br>
-      <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
+      <b>Q</b> scanner · <b>E</b> interact<br><b>1/2/3</b> deliver · <b>R</b> calibrate<br><b>T</b> track · <b>G</b> ping · <b>B</b> emote<br><b>Enter</b> chat · <b>H</b> help<br><b>Esc</b> this menu
     </div>
   </div>
 </div>
@@ -185,6 +213,10 @@
   <div id="scanOverlay"></div>
   <div id="labels"></div>
   <div id="scanTag">◈ SCANNER ACTIVE ◈</div>
+  <div id="compass"><div id="compassStrip"></div><div id="compassTick"></div></div>
+  <div id="courseHud" class="panel hidden"></div>
+  <div id="waypoint" class="hidden"></div>
+  <div id="emoteHint" class="panel hidden"><span class="key">1</span>👋 Wave <span class="key">2</span>🙌 Cheer <span class="key">3</span>💃 Dance <span class="key">4</span>🪑 Sit</div>
   <div id="roomInfo" class="panel"></div>
   <div id="objectives" class="panel"></div>
   <div id="region"></div>

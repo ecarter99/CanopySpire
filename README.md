@@ -31,6 +31,10 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 | Q | Scanner: nodes, resources, thermals, dormant sky-lines |
 | E | Inspect a node. In the panel: 1/2/3 deliver ⚡/🌱/⚙️, R = calibration minigame |
 | Enter | Chat (emoji quick-buttons) |
+| T | Track the next unrestored node (compass + on-screen waypoint) |
+| G / Middle-click | Ping a spot for everyone ("⚡ here", node names…) |
+| B then 1–4 | Emote: wave, cheer, dance, sit |
+| E (at a sky-line post) | Ride the sky-line zipline |
 | H | Help · mouse wheel = camera distance |
 | Esc | Game menu: resume, copy invite link, leave to home screen |
 
@@ -53,11 +57,24 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 
   Static scenery is merged into a few large draw calls to keep it fast.
 
+## Things to do besides restoring
+- **Sky-lines:** four ziplines. Two run from the canopy deck down to the outskirts; two more, from the Apex Crown, start running once the Crown Wind Turbines are restored.
+- **Bounce blooms:** land on the giant pink flowers to launch about 7 m up, then glide. One is active from the start; the rest sprout as each tier gets its first restoration.
+- **12 Seed Relics:** hidden in hard-to-reach spots, such as above a bloom, behind the waterfall, on top of a turbine, or at the crown's peak. Finding 3, 6, 9 and 12 unlocks the Leaf crown hat, Rainbow glider, Sprout hat and Golden glider. Relics are per-browser and carry across worlds.
+- **Glide-ring time trials:**
+  - *Canopy Drop* starts at the canopy deck's south-east edge.
+  - *Thermal Spiral* is around the western thermal and opens after the Geothermal Conduit is restored.
+
+  Best times are saved, and finishing posts your time to the room chat.
+- **Day & night:** about a 9-minute cycle, synced from the host. Expect sunsets, stars and a moon, warm window light, glowing lamps, and fireflies over restored meadows.
+- **Wildlife:** butterflies gather at flowerbeds as districts bloom; flocks of birds circle the spire by day.
+- **Sound:** fully procedural. Footsteps, glide wind, waterfalls, birdsong and crickets, and gentle generative music that grows richer as the spire is restored. Volume is on the home screen and in the Esc menu.
+
 ## Saving
 Your spire saves automatically in this browser's localStorage: node progress, carried materials, and your last safe position. It saves every 10 s, after deliveries and restorations, when you open the menu, and when you leave or close the tab.
 - **Play Solo** and **Host Room** continue from your save, so friends who join see your restored spire and help you progress it.
 - **Joining** someone's room plays *their* spire. Your own save isn't touched, and your progress there is saved on the host's side.
-- The home screen shows your save, with a **Start over** link to erase it. Saves are per-browser: a different browser or device starts fresh.
+- The home screen shows your save, with a **Start over** link to erase it. Saves are per-browser: a different browser or device starts fresh. The time of day is saved with your spire; relics and best times are kept separately.
 
 ## Loop
 Collect ⚡ energy cells, 🌱 bio-materials and ⚙️ scrap. They respawn after 45 s and are shared, so whoever grabs one first gets it. Deliver them to the 7 restoration nodes, then run 3 calibrations, which anyone can contribute to. Each restored node visibly changes its district and opens access:
@@ -81,7 +98,7 @@ Initial routes up: the stepped pillars west of the spire (climb + rest on top), 
   - scripts only from the same origin, no inline scripts
   - network connections only to the same origin and the PeerJS signalling server (`0.peerjs.com`)
   - no plugins or `<base>` tags
-- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; node IDs are checked against a fixed list; pickup IDs must be in range.
+- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; pings are rate-limited per player and emotes clamped to known values; node IDs are checked against a fixed list; pickup IDs must be in range.
 - **Per-peer rate limits on the host.** Overall messages: 40/s, bursts up to 80. Chat: 1/s, bursts up to 5. A peer that keeps flooding is disconnected.
 - **Room codes** come from `crypto.getRandomValues` (5 characters from a 32-letter alphabet).
 - **Known limits (by design for a friends playtest):**
