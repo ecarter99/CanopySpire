@@ -1,6 +1,6 @@
 # Canopy Spire — Multiplayer Web Prototype
 
-A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160, PeerJS 1.5.4 and the Rapier 0.21.0 physics engine (`@dimforge/rapier3d-compat`, a single ES module with its WebAssembly inlined) are vendored in `public/vendor/`, along with five of Three.js's example add-ons (OutlineEffect, RoundedBoxGeometry, BufferGeometryUtils, GLTFLoader, SkeletonUtils). The add-ons are unmodified except that their `'three'` import points at the local copy.
+A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160, PeerJS 1.5.4 and the Rapier 0.21.0 physics engine (`@dimforge/rapier3d-compat`, a single ES module with its WebAssembly inlined) are vendored in `public/vendor/`, along with Three.js example add-ons: OutlineEffect, RoundedBoxGeometry, BufferGeometryUtils, GLTFLoader, SkeletonUtils, and the post-processing set (EffectComposer, Pass, MaskPass, ShaderPass, UnrealBloomPass, OutputPass, CopyShader, LuminosityHighPassShader, OutputShader). The add-ons are unmodified except that their `'three'` import points at the local copy.
 
 ## Run
 ```bash
@@ -45,12 +45,12 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 - **Customize your character** on the home screen: outfit, accent, skin, hair, hat (none, straw, cap, flower crown, hood, beanie, goggles) and glider colour, with a live 3D preview. Your look is saved in this browser and shown to everyone in the room.
 - **Graphics** (home screen or Esc menu):
 
-  | Preset | Render scale | Shadows | Ink outlines | Grass |
-  |---|---|---|---|---|
-  | Low | 1x | 1024 | off | sparse |
-  | Medium | up to 1.5x | 2048 | on | medium |
-  | High (default) | 1.25–2x | 4096 | on | dense |
-  | Ultra | 2–3x | 4096 | on | densest |
+  | Preset | Render scale | Shadows | Ink outlines | Grass | Colour grade | Bloom |
+  |---|---|---|---|---|---|---|
+  | Low | 1x | 1024 | off | sparse | off | off |
+  | Medium | up to 1.5x | 2048 | on | medium | on | off |
+  | High (default) | 1.25–2x | 4096 | on | dense | on | on |
+  | Ultra | 2–3x | 4096 | on | densest | on | on |
 
   Pick a lower preset if the fps counter (bottom-right) is low.
 - Visuals are fully procedural:
