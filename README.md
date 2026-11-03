@@ -1,6 +1,6 @@
 # Canopy Spire — Multiplayer Web Prototype
 
-A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160 and PeerJS 1.5.4 are vendored in `public/vendor/`, along with five of Three.js's example add-ons (OutlineEffect, RoundedBoxGeometry, BufferGeometryUtils, GLTFLoader, SkeletonUtils). The add-ons are unmodified except that their `'three'` import points at the local copy.
+A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160, PeerJS 1.5.4 and the Rapier 0.21.0 physics engine (`@dimforge/rapier3d-compat`, a single ES module with its WebAssembly inlined) are vendored in `public/vendor/`, along with five of Three.js's example add-ons (OutlineEffect, RoundedBoxGeometry, BufferGeometryUtils, GLTFLoader, SkeletonUtils). The add-ons are unmodified except that their `'three'` import points at the local copy.
 
 ## Run
 ```bash
@@ -18,7 +18,7 @@ Every push to `main` that touches `public/` redeploys automatically (`.github/wo
 
 ## Multiplayer (2–4 players)
 - One player clicks **Host Room** and shares the 5-letter code. Others enter it and click **Join Room**. `?room=CODE` in the URL pre-fills the code.
-- Peer-to-peer via WebRTC. The public PeerJS cloud server only does signalling, so there is no server to run. The host is authoritative for node progress, pickups and chat. If the host leaves, clients continue solo with the world state they had.
+- Peer-to-peer via WebRTC. The public PeerJS cloud server only does signalling, so there is no server to run. The host is authoritative for node progress, pickups, chat and physics objects (it simulates them and streams their positions to everyone). If the host leaves, clients continue solo with the world state they had.
 - Some strict NAT/corporate networks block WebRTC. If joining times out, try another network.
 
 ## Controls
@@ -66,7 +66,7 @@ Three Keepers give a five-part quest chain. ❗ means they have a quest, ❓ mea
 | Quest | Keeper | What you do |
 |---|---|---|
 | The Songbird Stone | Mossa (by the spawn) | **Chime memory puzzle** in the west plaza: wake the Songbird Stone, then echo its melodies on five chime pillars. There are three rounds of 3/5/7 notes. Opens the **Sky portal**. |
-| Two Hands, One Gate | Brindle (east) | **Pressure-plate vault:** hold all three plates at once, with friends standing on them or by carrying seed-stones (E to lift/set down). Then claim the key inside. Opens the **Grotto portal**. |
+| Two Hands, One Gate | Brindle (east) | **Pressure-plate vault:** hold all three plates at once, with friends standing on them or with the seed-stones (walk into one to roll it, or press E to lift/set it down). Then claim the key inside. Opens the **Grotto portal**. |
 | Light in the Grotto | Aster (Portal Plaza, north) | **Crystal Grotto realm:** rotate seven mirrors so the sunbeam, split by a prism, lights *both* receivers. Take the Spirit Orb of Light. |
 | Winds of the Archipelago | Aster | **Sky Archipelago realm:** a floating-island parkour trial using jumps, a bounce bloom, a thermal and a grapple chain to the summit shrine. Take the Spirit Orb of Wind. |
 | The Keepers' Blessing | Mossa | Bring both orbs back to unlock the **Keeper's Circlet** hat and the **Starlight Glider**. |
@@ -113,6 +113,7 @@ Jump over the thorn waves it sends out. Healing it grants the Heartwood Seed and
 Bloomed sprouts, planted blooms, shrines, the altar and the healed Thornheart are shared world state, saved with the host's spire. Items, tools and quest progress belong to each player.
 
 ## Things to do besides restoring
+- **Physics objects:** walk into crates, barrels and the vault's seed-stones to push them. You can stand on them and stack them; everyone in the room sees the same result. Crates sit by the spawn point, the Root Vault and the chime plaza.
 - **Sky-lines:** four ziplines. Two run from the canopy deck down to the outskirts; two more, from the Apex Crown, start running once the Crown Wind Turbines are restored.
 - **Bounce blooms:** land on the giant pink flowers to launch about 7 m up, then glide. One is active from the start; the rest sprout as each tier gets its first restoration.
 - **12 Seed Relics:** hidden in hard-to-reach spots, such as above a bloom, behind the waterfall, on top of a turbine, or at the crown's peak. Finding 3, 6, 9 and 12 unlocks the Leaf crown hat, Rainbow glider, Sprout hat and Golden glider. Relics are per-browser and carry across worlds.
@@ -174,12 +175,12 @@ Opening a script in Blender's Scripting tab and running it shows the model in th
 
 ## Security
 - **Deploy `public/` only.** It contains no secrets; anyone with the URL can download the client.
-- **Dependencies vendored.** They were checked against npm's published sha512 hashes (three@0.160.0 including its examples, peerjs@1.5.4). No third-party script hosts at runtime.
+- **Dependencies vendored.** They were checked against npm's published sha512 hashes (three@0.160.0 including its examples, peerjs@1.5.4, @dimforge/rapier3d-compat@0.21.0). No third-party script hosts at runtime.
 - **CSP** (meta tag in `index.html`):
-  - scripts only from the same origin, no inline scripts
+  - scripts only from the same origin, no inline scripts; `'wasm-unsafe-eval'` lets the vendored Rapier WebAssembly compile (it doesn't allow JavaScript `eval`)
   - network connections only to the same origin and the PeerJS signalling server (`0.peerjs.com`)
   - no plugins or `<base>` tags
-- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; puzzle actions are validated by the host, including a distance check against the sender's last known position; pings are rate-limited per player and emotes clamped to known values; tool, world-change and boss actions are validated by the host (tool held, distance, phase); node IDs are checked against a fixed list; pickup IDs must be in range.
+- **All network input is untrusted.** In both directions, every peer message is type-checked and clamped before use (`safe*` helpers in `game.js`). Names and chat are escaped; colours must match `#rrggbb`; character looks are indices checked against fixed option lists; puzzle actions are validated by the host, including a distance check against the sender's last known position; pings are rate-limited per player and emotes clamped to known values; tool, world-change and boss actions are validated by the host (tool held, distance, phase); node IDs are checked against a fixed list; pickup IDs must be in range; physics pushes must name a real body, be a unit direction, and come from a player standing next to it, and only the host's body snapshots are applied.
 - **Per-peer rate limits on the host.** Overall messages: 40/s, bursts up to 80. Chat: 1/s, bursts up to 5. A peer that keeps flooding is disconnected.
 - **Room codes** come from `crypto.getRandomValues` (5 characters from a 32-letter alphabet).
 - **Known limits (by design for a friends playtest):**
@@ -190,7 +191,8 @@ Opening a script in Blender's Scripting tab and running it shows the model in th
 
 ## Code map (`public/game.js`)
 - `CFG`: tuning constants (stamina 100, climb 15/s, glide 8/s, 1.5 s regen delay, 20 Hz net, 0.05-unit delta threshold)
-- `Physics`: custom AABB collision with step-up, wall probes, camera ray tests
+- `Physics`: custom AABB collision with step-up, wall probes, camera ray tests. Every static box is also mirrored as a fixed Rapier collider
+- `DYN` / `dyn*()`: Rapier rigid bodies (crates, barrels, seed-stones). The authority steps them at 60 Hz, broadcasts `BODIES` at 15 Hz (awake bodies only), and takes `BODY_PUSH` requests. Each body also gets a moving AABB proxy so the player controller can stand on and bump into it
 - `World`: procedural world, `RestorationNode`s, `ThermalZone`s, anchors, pickups, and the per-tier dull→vibrant colour shift
 - `PlayerController`: IDLE/WALK/RUN/CLIMB/GLIDE/FALL (+GRAPPLE), stamina/exhaustion
 - `NetworkManager`: PeerJS star topology; `PLAYER_JOIN/LEAVE`, `PLAYER_MOVE`, `NODE_PROGRESS_UPDATE`, `NODE_RESTORED`, pickup and chat events
