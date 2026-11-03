@@ -1,6 +1,6 @@
 # Canopy Spire — Multiplayer Web Prototype
 
-A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160 and PeerJS 1.5.4 are vendored in `public/vendor/`, along with three of Three.js's example add-ons (OutlineEffect, RoundedBoxGeometry, BufferGeometryUtils). The add-ons are unmodified except that their `'three'` import points at the local copy.
+A solarpunk, non-violent, co-op traversal game: climb, glide and grapple through a vertical city and restore its broken infrastructure. Built from `canopy_spire_prd_sdd_multiplayer_web_prototype.md` as a static, no-build web app in `public/`. Three.js r160 and PeerJS 1.5.4 are vendored in `public/vendor/`, along with five of Three.js's example add-ons (OutlineEffect, RoundedBoxGeometry, BufferGeometryUtils, GLTFLoader, SkeletonUtils). The add-ons are unmodified except that their `'three'` import points at the local copy.
 
 ## Run
 ```bash
@@ -145,6 +145,32 @@ Collect ⚡ energy cells, 🌱 bio-materials and ⚙️ scrap. They respawn afte
 | Cloud-Deck Cascade | Apex | Grand cascade + rainbow |
 
 Initial routes up: the stepped pillars west of the spire (climb + rest on top), and the grapple rings at the canopy rim and on the sky anchors.
+
+## Art pipeline (Blender → glTF)
+Characters, the Thornheart, trees and key props are authored in **Blender 4.2 LTS** as Python scripts in `art/blender/`, and exported to `public/assets/*.glb`, which the game loads at startup.
+
+| Script | Output | What's in it |
+|---|---|---|
+| `character.py` | `character.glb` | Rigged player/NPC (15 bones), 13 clips (Idle, Walk, Run, Climb, Glide, Fall, Grapple, Zip, Wave, Cheer, Dance, Sit, Hold), 10 hats, paraglider |
+| `thornheart.py` | `thornheart.glb` | Rigged boss with Sway / Roar / Calm clips; named `Heart`, `Thorns`, `Blossoms` parts the game drives |
+| `trees.py` | `trees.glb` | 9 tree variants (`Tree_<round|blossom|pine|tall>_<n>`) |
+| `props.py` | `props.glb` | `LampPost`, `Bench`, `PortalArch`, `ChimePillar`, `SongbirdRock`, `SongbirdBird` |
+
+Rebuild everything, or a single asset, headless:
+```bash
+BLENDER=/path/to/blender art/build.sh            # all assets
+BLENDER=/path/to/blender art/build.sh character  # one asset
+python3 art/inspect_glb.py public/assets/*.glb    # summary: verts, materials, clips
+```
+
+**Conventions** (see `art/blender/common.py`):
+- **Orientation:** Blender is Z-up, and models face −Y. They arrive in the game Y-up and facing +Z.
+- **Materials:** material *names* are roles (`Outfit`, `Skin`, `Bark`, `Leaves`, `Glow`…). The game swaps each for its cel-shaded material and recolours roles: player looks, district vibrance, lamp glow and the boss's healing.
+- **Bones:** names avoid dots, because three.js strips them.
+- **Static props:** these are baked into the game's merged static batches, so they cost almost nothing to draw.
+- **Fallbacks:** every asset has one. If a `.glb` is missing or fails to load, the game uses its original procedural geometry, so gameplay never depends on art.
+
+Opening a script in Blender's Scripting tab and running it shows the model in the editor. Hand-editing in Blender is fine too: export with the same object, material and bone names, and the game picks it up.
 
 ## Security
 - **Deploy `public/` only.** It contains no secrets; anyone with the URL can download the client.
