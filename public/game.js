@@ -2,6 +2,8 @@ import * as THREE from './vendor/three.module.js';
 import { OutlineEffect } from './vendor/OutlineEffect.js';
 import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
 import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+import * as SkeletonUtils from './vendor/SkeletonUtils.js';
 const V3 = THREE.Vector3;
 
 // =====================================================================
@@ -410,7 +412,42 @@ function safeLook(l) {
   return r;
 }
 const lookColor = l => LOOK_OPTS.outfit[safeLook(l).o];
+function makeCharacterAsset(lookIn) {
+  const L = safeLook(lookIn), gl = ASSETS.character, model = SkeletonUtils.clone(gl.scene), g = new THREE.Group(); g.add(model);
+  const col = { Outfit: LOOK_OPTS.outfit[L.o], Accent: LOOK_OPTS.accent[L.a], Skin: LOOK_OPTS.skin[L.s], Hair: LOOK_OPTS.hair[L.h], Pants: '#3d4a5c', Boots: '#7a5232', Brown: '#7a5232' };
+  const gv = LOOK_OPTS.glider[L.g], ds = { side: THREE.DoubleSide };
+  model.traverse(o => {
+    if (!o.isMesh) return;
+    const n = o.material.name; let m;
+    if (n === 'GliderCanopy') {
+      if (gv === 'rainbow') { o.geometry = o.geometry.clone(); const p = o.geometry.attributes.position, c = new Float32Array(p.count * 3), cc = new THREE.Color(); for (let i = 0; i < p.count; i++) { cc.setHSL((p.getX(i) / 1.35 + 1) / 2 * 0.8, 0.85, 0.6, THREE.SRGBColorSpace); c.set([cc.r, cc.g, cc.b], i * 3); } o.geometry.setAttribute('color', new THREE.BufferAttribute(c, 3)); m = toon(0xffffff, { ...ds, vertexColors: true }); }
+      else if (gv === 'gold') m = toon(0xffcf40, { ...ds, emissive: 0x8a6000, emissiveIntensity: 0.35 });
+      else if (gv === 'starlight') m = toon(0x26346e, { ...ds, emissive: 0x5b6fe0, emissiveIntensity: 0.45 });
+      else if (gv === 'heartwood') m = toon(0x7a5232, { ...ds, map: TEX.wood });
+      else m = toon(new THREE.Color(gv).getHex(), ds);
+    } else if (n === 'GliderStripe') m = toon(new THREE.Color(col.Accent).getHex(), ds);
+    else m = toon(col[n] ? new THREE.Color(col[n]).getHex() : o.material.color.getHex());
+    o.material = m; o.castShadow = true; if (o.isSkinnedMesh) o.frustumCulled = false;
+  });
+  const hatName = 'Hat_' + LOOK_OPTS.hat[L.hat].replace(/ /g, '_');
+  model.traverse(o => { if (o.name.startsWith('Hat_') && !(o.parent && o.parent.name.startsWith('Hat_'))) o.visible = o.name === hatName; }); // toggle whole hats, not their sub-meshes
+  const glider = model.getObjectByName('Glider'); glider.visible = false;
+  const handR = model.getObjectByName('hand_R'), handL = model.getObjectByName('hand_L');
+  const mixer = new THREE.AnimationMixer(model), actions = {}; for (const c of gl.animations) actions[c.name] = mixer.clipAction(c);
+  actions.Idle.play();
+  return { group: g, root: model, legs: [], arms: [handR, handL], handBone: handR, glider, mixer, actions, cur: 'Idle', t: Math.random() * 10 };
+}
+const CLIP_FOR = { IDLE: 'Idle', WALK: 'Walk', RUN: 'Run', CLIMB: 'Climb', GLIDE: 'Glide', FALL: 'Fall', GRAPPLE: 'Grapple', ZIP: 'Zip' }, EMOTE_CLIP = [null, 'Wave', 'Cheer', 'Dance', 'Sit'];
+function animateAsset(c, state, dt, emote) {
+  let clip = CLIP_FOR[state] || 'Idle';
+  if (state === 'IDLE' && emote) clip = EMOTE_CLIP[emote];
+  else if (state === 'IDLE' && c.holding) clip = 'Hold';
+  if (c.showGlider) clip = 'Glide';
+  if (clip !== c.cur && c.actions[clip]) { const next = c.actions[clip], prev = c.actions[c.cur]; next.reset().fadeIn(0.18).play(); if (prev) prev.fadeOut(0.18); c.cur = clip; }
+  c.mixer.update(dt); c.glider.visible = state === 'GLIDE' || c.showGlider === true;
+}
 function makeCharacter(lookIn) {
+  if (ASSETS.character) return makeCharacterAsset(lookIn);
   const L = safeLook(lookIn), hx = (k, i) => new THREE.Color(LOOK_OPTS[k][i]).getHex();
   const outfit = hx('outfit', L.o), accent = hx('accent', L.a), skin = hx('skin', L.s), hair = hx('hair', L.h), gv = LOOK_OPTS.glider[L.g];
   const g = new THREE.Group(), root = new THREE.Group(); g.add(root);
@@ -505,6 +542,7 @@ function makeCharacter(lookIn) {
   return { group: g, root, legs, arms, glider, t: Math.random() * 10 };
 }
 function animateCharacter(c, state, dt, emote = 0) {
+  if (c.mixer) return animateAsset(c, state, dt, emote);
   c.t += dt;
   const t = c.t; let lL = 0, lR = 0, aL = 0, aR = 0, aLz = 0.08, aRz = -0.08;
   if (state === 'WALK' || state === 'RUN') { const sw = state === 'RUN' ? 0.95 : 0.6, f = state === 'RUN' ? 13 : 9; const s = Math.sin(t * f) * sw; lL = s; lR = -s; aL = -s * 0.8; aR = s * 0.8; }
@@ -663,8 +701,12 @@ class World {
       const lg2 = ICO1.clone(); lg2.scale(0.7 * s, 1.35 * s, 0.7 * s); lg2.translate(0.38 * s, th + 0.75 * s, 0.22 * s); leafG.push(lg2);
     }
     const leafCol = kind === 'blossom' ? 0xf4a6c6 : kind === 'pine' ? 0x2f8f5b : [PAL.leaf, PAL.leaf2, 0x5cb85c][Math.floor(r() * 3)];
-    const trunk = new THREE.Mesh(mergeNI(trunkG), tmat(tier, 0x8d5e3a, TEX.wood)); trunk.castShadow = trunk.receiveShadow = true; g.add(trunk);
-    const leaves = new THREE.Mesh(mergeNI(leafG), tmat(tier, leafCol)); leaves.castShadow = leaves.receiveShadow = true; g.add(leaves);
+    const variants = { round: 3, blossom: 2, pine: 2, tall: 2 }, src = assetNode('trees', `Tree_${kind}_${Math.floor(r() * variants[kind])}`);
+    if (src) { const inst = toonize(src.clone(), n => n === 'Bark' ? tmat(tier, 0x8d5e3a) : tmat(tier, leafCol)); inst.position.set(0, 0, 0); inst.rotation.set(0, 0, 0); inst.scale.setScalar(s); g.add(inst); }
+    else {
+      const trunk = new THREE.Mesh(mergeNI(trunkG), tmat(tier, 0x8d5e3a, TEX.wood)); trunk.castShadow = trunk.receiveShadow = true; g.add(trunk);
+      const leaves = new THREE.Mesh(mergeNI(leafG), tmat(tier, leafCol)); leaves.castShadow = leaves.receiveShadow = true; g.add(leaves);
+    }
     if (kind === 'round' || kind === 'blossom') for (let i = 0; i < 7; i++) {
       const a = r() * 6.28, rr = 1.05 * s + r() * 0.4 * s, ly = th + 0.45 * s + r() * 1.1 * s, lx = Math.cos(a) * rr, lz = Math.sin(a) * rr;
       const b = ICO.clone(); b.scale(0.15 * s, 0.15 * s, 0.15 * s);
@@ -682,6 +724,7 @@ class World {
     this.plants[tier].push(g); this.scene.add(g); return g;
   }
   lamp(x, y, z, tier) {
+    if (putAsset(assetNode('props', 'LampPost'), propMat(tier), x, y, z)) { this.phys.add(x - 0.12, y, z - 0.12, x + 0.12, y + 3.2, z + 0.12, 'lamp'); return; }
     const metal = tmat(tier, PAL.metal);
     this.put(cylGeo(0.07, 0.1, 3.2, 10), metal, x, y + 1.6, z);
     this.put(cylGeo(0.2, 0.24, 0.3, 10), metal, x, y + 0.15, z);
@@ -691,6 +734,7 @@ class World {
     this.phys.add(x - 0.12, y, z - 0.12, x + 0.12, y + 3.2, z + 0.12, 'lamp');
   }
   bench(x, y, z, alongX, tier) {
+    if (putAsset(assetNode('props', 'Bench'), propMat(tier), x, y, z, alongX ? 0 : Math.PI / 2)) { const [w, d] = alongX ? [2.2, 0.6] : [0.6, 2.2]; this.phys.add(x - w / 2, y + 0.42, z - d / 2, x + w / 2, y + 0.52, z + d / 2); return; }
     const wood = tmat(tier, PAL.wood, TEX.wood), metal = tmat(tier, PAL.metal), L = 2.2, D = 0.6;
     const [w, d] = alongX ? [L, D] : [D, L];
     this.block(x - w / 2, y + 0.42, z - d / 2, x + w / 2, y + 0.52, z + d / 2, wood, { r: 0.04 });
@@ -1668,6 +1712,35 @@ sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -70
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04; scene.add(sun); scene.add(sun.target);
 const SUN_DIR = new V3(0.55, 0.75, 0.35).normalize();
 const sunSprite = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'); const gr = g.createRadialGradient(64, 64, 4, 64, 64, 64); gr.addColorStop(0, 'rgba(255,255,240,1)'); gr.addColorStop(0.25, 'rgba(255,245,200,0.9)'); gr.addColorStop(1, 'rgba(255,230,150,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); const t = new THREE.CanvasTexture(c); const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, fog: false, depthWrite: false, transparent: true })); s.scale.setScalar(160); scene.add(s); return s; })();
+
+// ---------- Blender-authored assets (art/blender → public/assets/*.glb); everything falls back to procedural if missing ----------
+async function loadAssets() {
+  const loader = new GLTFLoader(), A = {}, status = document.getElementById('menuStatus');
+  if (status) status.textContent = 'Loading 3D models…';
+  await Promise.all(['character', 'thornheart', 'trees', 'props'].map(n => loader.loadAsync(`assets/${n}.glb`).then(g => { A[n] = g; }).catch(e => console.warn(`[assets] ${n}.glb unavailable, using procedural fallback`, e))));
+  if (status && status.textContent === 'Loading 3D models…') status.textContent = '';
+  return A;
+}
+const ASSETS = await loadAssets();
+const assetNode = (key, name) => ASSETS[key] ? ASSETS[key].scene.getObjectByName(name) : null;
+// Bake a Blender prop into the static batch at a placement, with materials chosen by role name.
+function putAsset(obj, matFor, x, y, z, ry = 0, s = 1) {
+  if (!obj) return false;
+  obj.updateMatrixWorld(true);
+  const inv = obj.matrixWorld.clone().invert(), place = new THREE.Matrix4().compose(new V3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), ry), new V3(s, s, s));
+  obj.traverse(o => {
+    if (!o.isMesh) return;
+    const g = o.geometry.clone();
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    g.applyMatrix4(place.clone().multiply(inv.clone().multiply(o.matrixWorld)));
+    world.addStatic(g, matFor(o.material.name, o.material));
+  });
+  return true;
+}
+const PROP_COL = { Stone: PAL.stone, Trim: PAL.teal, Metal: PAL.metal, Wood: PAL.wood, Brass: PAL.brass, Leaves: PAL.leaf, Rock: 0x9aa7b0, Bird: 0x7ec8e3, Beak: 0xffb74d, Eye: 0x222222 };
+const propMat = tier => (name, src) => name === 'Glow' ? world.lampMat : (tier == null ? toon(PROP_COL[name] ?? src.color.getHex()) : tmat(tier, PROP_COL[name] ?? src.color.getHex()));
+// Re-material a live (non-batched) asset instance.
+function toonize(root, pick) { root.traverse(o => { if (!o.isMesh) return; o.material = pick(o.material.name, o.material) || toon(o.material.color.getHex()); o.castShadow = true; o.receiveShadow = true; }); return root; }
 
 const phys = new Physics();
 const world = new World(scene, phys);
@@ -2678,18 +2751,20 @@ function glowMat(hex, k = 0.25) { return toon(hex, { emissive: hex, emissiveInte
 const CHP = VA(PLAZAS.chimes);
 function chimePillarPos(i) { const a = Math.PI + (i - 2) * 0.55; return new V3(CHP.x + Math.cos(a) * 6.5, 1.6, CHP.z + Math.sin(a) * 6.5); }
 plazaFloor(CHP, 11);
-world.put(rockGeo(1.5, 7), toon(0x9aa7b0), CHP.x, 0.7, CHP.z, { sy: 0.9 });
+if (!putAsset(assetNode('props', 'SongbirdRock'), propMat(null), CHP.x, 0, CHP.z)) world.put(rockGeo(1.5, 7), toon(0x9aa7b0), CHP.x, 0.7, CHP.z, { sy: 0.9 });
 phys.add(CHP.x - 1.2, 0, CHP.z - 1.2, CHP.x + 1.2, 1.7, CHP.z + 1.2, 'stone');
 const songbird = new THREE.Group(); songbird.position.set(CHP.x, 1.75, CHP.z); scene.add(songbird);
-{ const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), toon(0x7ec8e3)); body.scale.set(1, 0.85, 1.25); songbird.add(body);
+const birdAsset = assetNode('props', 'SongbirdBird');
+if (birdAsset) { const b = toonize(birdAsset.clone(), propMat(null)); b.position.set(0, -1.75, 0); b.rotation.y = Math.PI; songbird.add(b); }
+else { const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), toon(0x7ec8e3)); body.scale.set(1, 0.85, 1.25); songbird.add(body);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 10), toon(0x7ec8e3)); head.position.set(0, 0.36, 0.38); songbird.add(head);
   const beak = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.26, 8), toon(0xffb74d)); beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.34, 0.68); songbird.add(beak);
   for (const s of [-1, 1]) { const w = new THREE.Mesh(ICO1, toon(0x4fa3c7)); w.scale.set(0.12, 0.28, 0.42); w.position.set(s * 0.42, 0.05, -0.05); songbird.add(w); const e = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), toon(0x222222)); e.position.set(s * 0.12, 0.42, 0.58); songbird.add(e); } }
 const songRing = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.07, 6, 48), glowMat(0x7ff0ff, 0.1)); songRing.rotation.x = Math.PI / 2; songRing.position.set(CHP.x, 1.25, CHP.z); scene.add(songRing);
 const chimes = [0, 1, 2, 3, 4].map(i => {
   const p = chimePillarPos(i);
-  world.block(p.x - 0.45, 0, p.z - 0.45, p.x + 0.45, 3.4, p.z + 0.45, stoneMat, { r: 0.12 });
-  world.block(p.x - 0.65, 3.4, p.z - 0.65, p.x + 0.65, 3.7, p.z + 0.65, toon(PAL.brass), { collide: false, r: 0.08 });
+  if (putAsset(assetNode('props', 'ChimePillar'), propMat(null), p.x, 0, p.z)) phys.add(p.x - 0.45, 0, p.z - 0.45, p.x + 0.45, 3.4, p.z + 0.45);
+  else { world.block(p.x - 0.45, 0, p.z - 0.45, p.x + 0.45, 3.4, p.z + 0.45, stoneMat, { r: 0.12 }); world.block(p.x - 0.65, 3.4, p.z - 0.65, p.x + 0.65, 3.7, p.z + 0.65, toon(PAL.brass), { collide: false, r: 0.08 }); }
   const mat = glowMat(CHIME_COLS[i], 0.12), crystal = new THREE.Mesh(facet(new THREE.OctahedronGeometry(0.42)), mat);
   crystal.scale.y = 1.6; crystal.position.set(p.x, 4.6, p.z); scene.add(crystal);
   const plate = new THREE.Mesh(cylGeo(0.8, 0.85, 0.1, 24), mat); plate.position.set(p.x + (CHP.x - p.x) * 0.22, 0.13, p.z + (CHP.z - p.z) * 0.22); scene.add(plate);
@@ -2829,11 +2904,12 @@ void main(){
 }`;
 function buildPortal(P) {
   const g = new THREE.Group(); g.position.set(...P.pos); g.rotation.y = P.face; scene.add(g);
-  const sm = toon(0xf3ead6, { map: TEX.stone });
-  for (const s of [-1, 1]) { const p = new THREE.Mesh(boxGeo(0.9, 5.2, 0.9, 4, 0.12), sm); p.position.set(s * 2.5, 2.6, 0); p.castShadow = true; g.add(p); phys.add(P.pos[0] + s * 2.5 - 0.45, P.pos[1], P.pos[2] - 0.45, P.pos[0] + s * 2.5 + 0.45, P.pos[1] + 5.2, P.pos[2] + 0.45, 'portal'); }
-  const arch = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.45, 10, 28, Math.PI), sm); arch.position.y = 5.2; arch.castShadow = true; g.add(arch);
-  const key = new THREE.Mesh(facet(new THREE.OctahedronGeometry(0.5)), glowMat(P.color, 0.6)); key.position.y = 7.9; g.add(key);
-  const base = new THREE.Mesh(boxGeo(6.4, 0.3, 2.2, 4, 0.08), sm); base.position.y = 0.15; base.receiveShadow = true; g.add(base);
+  const sm = toon(0xf3ead6, { map: TEX.stone }), archAsset = assetNode('props', 'PortalArch');
+  if (archAsset) { const a = toonize(archAsset.clone(), propMat(null)); a.position.set(0, 0, 0); a.rotation.set(0, 0, 0); g.add(a); }
+  for (const s of [-1, 1]) { const p = new THREE.Mesh(boxGeo(0.9, 5.2, 0.9, 4, 0.12), sm); p.position.set(s * 2.5, 2.6, 0); p.castShadow = true; p.visible = !archAsset; g.add(p); phys.add(P.pos[0] + s * 2.5 - 0.45, P.pos[1], P.pos[2] - 0.45, P.pos[0] + s * 2.5 + 0.45, P.pos[1] + 5.2, P.pos[2] + 0.45, 'portal'); }
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.45, 10, 28, Math.PI), sm); arch.position.y = 5.2; arch.castShadow = true; arch.visible = !archAsset; g.add(arch);
+  const key = new THREE.Mesh(facet(new THREE.OctahedronGeometry(0.5)), glowMat(P.color, 0.6)); key.position.y = archAsset ? 8.75 : 7.9; g.add(key);
+  const base = new THREE.Mesh(boxGeo(6.4, 0.3, 2.2, 4, 0.08), sm); base.position.y = 0.15; base.receiveShadow = true; base.visible = !archAsset; g.add(base);
   const mat = noOutline(new THREE.ShaderMaterial({ vertexShader: portalVS, fragmentShader: portalFS, transparent: true, depthWrite: false, side: THREE.DoubleSide, uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(P.color) }, uOpen: { value: 0 } } }));
   const surf = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 7.2), mat); surf.position.y = 3.6 + 0.0; g.add(surf);
   const label = mkLabel('portal', '');
@@ -3354,7 +3430,24 @@ const flowerObjs = FLOWERS.map((p, i) => { const g = new THREE.Group(); g.positi
 // the Thornheart
 const guardian = new THREE.Group(); guardian.position.set(TW.x, AY, TW.z); scene.add(guardian);
 const barkMat = toon(0x6b4a3a, { map: TEX.wood, unique: true }), eyeMat = glowMat(0xff3d5a, 1.2), heartMat = glowMat(0xff3d5a, 0.9), crownMat = toon(0x6a5a6e, { unique: true });
-{
+let guardianMixer = null, guardianActs = {}, guardianClip = '', guardianRoarT = 0;
+function guardianRoar() { if (!guardianMixer) return; guardianClip = ''; guardianPlay('Roar', true); guardianRoarT = 1.6; }
+if (ASSETS.thornheart) {
+  const gl = ASSETS.thornheart, root = gl.scene;
+  toonize(root, n => ({ Bark: barkMat, Leaves: crownMat, Eyes: eyeMat, Heart: heartMat, Thorn: toon(0x3b2340), Blossom: toon(0xff8fb1), White: toon(0xffffff), Pollen: toon(0xffd54f), Dark: toon(0x2a1d16), Moss: toon(0x5c7a4a) })[n]);
+  root.traverse(o => { if (o.isSkinnedMesh) o.frustumCulled = false; });
+  guardian.add(root);
+  guardian.userData = { heart: root.getObjectByName('Heart'), thorns: root.getObjectByName('Thorns'), blossoms: root.getObjectByName('Blossoms'), arms: [] };
+  guardian.userData.blossoms.visible = false;
+  guardianMixer = new THREE.AnimationMixer(root); for (const c of gl.animations) guardianActs[c.name] = guardianMixer.clipAction(c);
+}
+function guardianPlay(name, once = false) {
+  if (!guardianMixer || !guardianActs[name] || guardianClip === name) return;
+  const next = guardianActs[name], prev = guardianActs[guardianClip];
+  next.reset(); next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity); next.clampWhenFinished = once; next.fadeIn(0.4).play(); if (prev) prev.fadeOut(0.4);
+  guardianClip = name;
+}
+if (!ASSETS.thornheart) {
   const body = new THREE.Mesh(cylGeo(2.0, 2.8, 9, 14, TEX.wood), barkMat); body.position.y = 4.5; body.castShadow = true; guardian.add(body);
   const head = new THREE.Mesh(new THREE.SphereGeometry(2.3, 20, 14), barkMat); head.position.y = 10.2; head.scale.set(1, 0.85, 0.95); guardian.add(head);
   for (const s of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.38, 14, 10), eyeMat); e.position.set(s * 0.85, 10.5, 2.0); guardian.add(e); }
@@ -3433,6 +3526,7 @@ function applyBoss(raw) {
     if (s.sp === 'fail' && prev.sp !== 'fail' && inArena) game.toast('🎶 The song falters… listen again.');
   }
   if (s.phase !== prev.phase) {
+    if (s.phase >= 1 && s.phase <= 3 && game.playing) guardianRoar();
     if (s.phase === 1) { sfx.play('roar'); if (inArena) game.toast('🌳 The Thornheart stirs! Water its three roots within 25s of each other 🚿', true); }
     if (s.phase === 2) { sfx.play('roar'); world.tween(1.5, k => guardian.userData.thorns.scale.setScalar(Math.max(0.01, 1 - k))); if (inArena) game.toast('✨ The thorns wither! Raise a Prism Lens 🔍 on the west pad — and light the east pad too (mirror or lens)', true); }
     if (s.phase === 3) { sfx.play('roar'); if (inArena) game.toast('💖 Its heart is warming… now, the song!', true); }
@@ -3544,7 +3638,8 @@ function useTool() {
 }
 // held tools on every character (self, friends, keepers)
 function buildHeld(c) {
-  if (c.held && c.held._arm === c.arms[0]) return c.held; const hand = new THREE.Group(); hand.position.set(0, -0.5, 0.06); c.arms[0].add(hand);
+  if (c.held && c.held._arm === c.arms[0]) return c.held; const hand = new THREE.Group();
+  if (c.handBone) { hand.position.set(0, 0.06, 0); hand.rotation.x = Math.PI; c.handBone.add(hand); } else { hand.position.set(0, -0.5, 0.06); c.arms[0].add(hand); }
   const T = []; const grp = () => { const g = new THREE.Group(); g.visible = false; hand.add(g); T.push(g); return g; }; T.push(null);
   { const g = grp(); const b = new THREE.Mesh(cylGeo(0.13, 0.14, 0.22, 14), toon(0x4fb3c7)); g.add(b); const sp = new THREE.Mesh(cylGeo(0.025, 0.035, 0.32, 8), toon(0x4fb3c7)); sp.rotation.x = 1.0; sp.position.set(0, 0.04, 0.2); g.add(sp); const h = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.02, 6, 12, Math.PI), toon(0x2f7f8f)); h.position.y = 0.11; g.add(h); }
   { const g = grp(); const f = new THREE.Mesh(boxGeo(0.18, 0.24, 0.18, 0, 0.03), toon(PAL.brass, { transparent: true, opacity: 0.6 })); g.add(f); const glowM = toon(0xfff1c1, { emissive: 0xffc46b, emissiveIntensity: 0.1, unique: true }); const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), glowM); g.add(bulb); g.userData.glow = glowM; const h = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.015, 6, 12), toon(PAL.brass)); h.position.y = 0.16; g.add(h); }
@@ -3556,7 +3651,8 @@ function buildHeld(c) {
 function showHeld(c, k, use) {
   const T = buildHeld(c); for (let i = 1; i < T.length; i++) T[i].visible = i === k;
   if (k === 2) T[2].userData.glow.emissiveIntensity = use ? 2.2 : 0.1;
-  if (k && use && (k === 2 || k === 5)) { c.arms[0].rotation.x = k === 5 ? -1.65 : -0.9; c.arms[0].rotation.z = -0.15; }
+  c.holding = !!(k && use && (k === 2 || k === 5));
+  if (c.holding && !c.mixer) { c.arms[0].rotation.x = k === 5 ? -1.65 : -0.9; c.arms[0].rotation.z = -0.15; }
 }
 
 // ---------- per-frame update ----------
@@ -3599,6 +3695,7 @@ function expansionWorld(dt) {
   // Thornheart animation
   const B = game.boss, calm = B.phase === 4;
   guardian.rotation.y = Math.sin(t * 0.4) * (calm ? 0.05 : 0.15); guardian.userData.arms.forEach((a, i) => a.rotation.z = (i ? -1 : 1) * (0.15 + Math.sin(t * (calm ? 0.8 : 1.6) + i) * (calm ? 0.05 : 0.18)));
+  if (guardianMixer) { guardianRoarT -= dt; if (guardianRoarT <= 0) guardianPlay(calm ? 'Calm' : 'Sway'); guardianMixer.update(dt); }
   guardian.userData.heart.rotation.y += dt * (B.phase >= 2 ? 2 : 0.5); heartMat.emissiveIntensity = calm ? 1.2 : B.phase >= 2 ? 0.6 + B.lightT * 0.4 + Math.sin(t * 6) * 0.2 : 0.4;
   anchorRings.forEach((m, i) => m.material.emissiveIntensity = B.phase === 1 && B.anchors[i] > 0 ? 1.2 : B.phase >= 2 ? 0.6 : 0.05);
   padMirror.rotation.y = lerpAngle(padMirror.rotation.y, B.mirror === 1 ? Math.PI / 4 : B.mirror === 0 ? -Math.PI / 4 : Math.PI / 2, Math.min(1, dt * 8));
