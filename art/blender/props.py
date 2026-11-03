@@ -13,7 +13,10 @@ M = {k: mat(k, c) for k, c in {'Stone': '#f3ead6', 'Trim': '#3cc9b5', 'Metal': '
                                'Leaves': '#4caf50', 'Rock': '#9aa7b0', 'Bird': '#7ec8e3', 'Beak': '#ffb74d', 'Eye': '#222222'}.items()}
 objs = []
 def prop(name, parts, x):
-    o = join(parts, name); o.location.x = x; objs.append(o); return o
+    # join() keeps the first part's origin; parts are modelled around (0,0,0) = base centre, so move the
+    # pivot back there (otherwise e.g. the portal arch pivots on its left plinth and sits 2.5 m off-centre)
+    o = join(parts, name)
+    o.data.transform(o.matrix_basis); o.matrix_basis = Matrix.Identity(4); o.location.x = x; objs.append(o); return o
 # lamp post: fluted pole, scrollwork arm, lantern cage with glowing bulb
 lamp = [cyl('base', (0, 0, 0.15), 0.26, 0.3, M['Metal'], 12, r2=0.2), cyl('pole', (0, 0, 1.7), 0.075, 3.0, M['Metal'], 12, r2=0.06),
         torus('collar', (0, 0, 0.6), 0.1, 0.03, M['Brass'], major=16, minor=6), torus('collar2', (0, 0, 3.15), 0.09, 0.03, M['Brass'], major=16, minor=6),
