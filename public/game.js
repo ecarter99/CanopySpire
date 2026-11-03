@@ -4,6 +4,7 @@ import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
 import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
 import * as SkeletonUtils from './vendor/SkeletonUtils.js';
+import RAPIER from './vendor/rapier3d-compat.mjs';
 const V3 = THREE.Vector3;
 
 // =====================================================================
@@ -340,13 +341,20 @@ const TUFT_GEO = (() => {
 // PHYSICS — custom AABB world (axis-aligned, self-contained)
 // =====================================================================
 class Physics {
-  constructor() { this.boxes = []; }
+  // Static AABBs drive the player controller; each one is mirrored as a fixed Rapier collider so
+  // dynamic bodies (crates, seed-stones) collide with the same world. `dynBoxes` are moving AABB
+  // proxies of those bodies, so players can stand on, bump into and push them.
+  constructor() { this.boxes = []; this.dynBoxes = []; this.rw = new RAPIER.World({ x: 0, y: -CFG.GRAVITY, z: 0 }); }
   add(x0, y0, z0, x1, y1, z1, tag) {
     const min = new V3(Math.min(x0, x1), Math.min(y0, y1), Math.min(z0, z1));
     const max = new V3(Math.max(x0, x1), Math.max(y0, y1), Math.max(z0, z1));
     const b = { min, max, enabled: true, tag, box3: new THREE.Box3(min, max) };
+    const hx = Math.max(0.005, (max.x - min.x) / 2), hy = Math.max(0.005, (max.y - min.y) / 2), hz = Math.max(0.005, (max.z - min.z) / 2);
+    b.col = this.rw.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(min.x + hx, min.y + hy, min.z + hz)); b.colOn = true;
     this.boxes.push(b); return b;
   }
+  addDyn(tag) { const min = new V3(), max = new V3(); const b = { min, max, enabled: true, tag, box3: new THREE.Box3(min, max), dyn: null }; this.boxes.push(b); this.dynBoxes.push(b); return b; }
+  syncColliders() { for (const b of this.boxes) if (b.col && b.colOn !== b.enabled) { b.colOn = b.enabled; b.col.setEnabled(b.enabled); } } // `enabled` is toggled directly all over the game
   ov(p, b) {
     const { HX, H } = CFG;
     return p.x + HX > b.min.x && p.x - HX < b.max.x && p.y + H > b.min.y && p.y < b.max.y && p.z + HX > b.min.z && p.z - HX < b.max.z;
@@ -365,7 +373,8 @@ class Physics {
     return top;
   }
   move(p, d, stepUp) {
-    const res = { ground: false, ceil: false, hitX: false, hitZ: false };
+    const res = { ground: false, ceil: false, hitX: false, hitZ: false, dyn: null };
+    for (const b of this.dynBoxes) b.skip = b.enabled && this.ov(p, b); // already inside a moving body: let the player walk out instead of popping
     const n = Math.max(1, Math.ceil(Math.max(Math.abs(d.x), Math.abs(d.y), Math.abs(d.z)) / 0.25));
     const sx = d.x / n, sy = d.y / n, sz = d.z / n;
     for (let i = 0; i < n; i++) {
@@ -378,16 +387,17 @@ class Physics {
   }
   resolveH(p, ax, s, res, stepUp) {
     for (const b of this.boxes) {
-      if (!b.enabled || !this.ov(p, b)) continue;
+      if (!b.enabled || b.skip || !this.ov(p, b)) continue;
       const rise = b.max.y - p.y;
       if (stepUp && rise > 0 && rise <= CFG.STEP) { const oy = p.y; p.y = b.max.y + 0.001; if (!this.overlapAt(p)) continue; p.y = oy; }
       p[ax] = s > 0 ? b.min[ax] - CFG.HX - 0.001 : b.max[ax] + CFG.HX + 0.001;
       if (ax === 'x') res.hitX = true; else res.hitZ = true;
+      if (b.dyn) res.dyn = b.dyn;
     }
   }
   resolveV(p, s, res) {
     for (const b of this.boxes) {
-      if (!b.enabled || !this.ov(p, b)) continue;
+      if (!b.enabled || b.skip || !this.ov(p, b)) continue;
       if (s < 0) { p.y = b.max.y; res.ground = true; res.groundBox = b; } else { p.y = b.min.y - CFG.H - 0.001; res.ceil = true; }
     }
   }
@@ -1452,8 +1462,9 @@ class PlayerController {
     if (this.grounded && this.bounceCheck(res)) return;
     if (res.ground && this.vel.y < 0) this.vel.y = 0;
     if (res.ceil && this.vel.y > 0) this.vel.y = 0;
+    if (res.dyn && mlen > 0.3 && this.onPush) this.onPush(res.dyn, mx, mz); // walked into a crate / seed-stone
     if (res.hitX) this.vel.x = 0; if (res.hitZ) this.vel.z = 0;
-    if ((res.hitX || res.hitZ) && mlen > 0.3 && this.climbCD <= 0 && this.canUse()) { const n = this.findWall(mx, mz); if (n) { this.startClimb(n); return; } }
+    if ((res.hitX || res.hitZ) && !res.dyn && mlen > 0.3 && this.climbCD <= 0 && this.canUse()) { const n = this.findWall(mx, mz); if (n) { this.startClimb(n); return; } } // movable things get pushed, not climbed
     const hs = Math.hypot(this.vel.x, this.vel.z);
     this.state = this.grounded ? (hs > CFG.WALK + 0.5 ? 'RUN' : hs > 0.6 ? 'WALK' : 'IDLE') : 'FALL';
   }
@@ -1577,7 +1588,7 @@ class NetworkManager {
   onHostLost() {
     this.game.toast('Lost connection to host — continuing solo in their spire (this session isn’t saved).');
     this.mode = 'offline'; this.hostConn = null; this.selfId = 'solo';
-    this.game.clearRemotes(); this.initAuthority(true); this.game.refreshRoomInfo();
+    this.game.clearRemotes(); this.initAuthority(true); dynBecomeAuthority(); this.game.refreshRoomInfo();
   }
   onConn(conn) {
     // token buckets: overall messages (moves are 20 Hz) and chat
@@ -1608,7 +1619,7 @@ class NetworkManager {
     conn.on('error', () => this.dropPeer(conn.peer));
   }
   dropPeer(id) { if (!this.conns.has(id)) return; this.conns.delete(id); puzzleDropCarrier(this, id); this.auth.players.delete(id); this.broadcast({ t: 'PLAYER_LEAVE', id }); }
-  snapshot() { return { nodes: this.auth.nodes, taken: [...this.auth.taken], puzzles: this.auth.puzzles, env: this.auth.env, boss: this.auth.boss }; }
+  snapshot() { return { nodes: this.auth.nodes, taken: [...this.auth.taken], puzzles: this.auth.puzzles, env: this.auth.env, boss: this.auth.boss, bodies: dynSnapshot() }; }
   // local intent → authority
   send(m) { if (this.mode === 'client') { if (this.hostConn && this.hostConn.open) this.hostConn.send(m); } else this.hostHandle(this.selfId, m); }
   sendTo(id, m) { if (id === this.selfId) this.game.apply(m); else { const c = this.conns.get(id); if (c && c.open) c.send(m); } }
@@ -1630,6 +1641,7 @@ class NetworkManager {
         this.broadcast({ t: 'PLAYER_MOVE', id: from, p, r, s, e, k, u }, from); break;
       }
       case 'PUZZLE': puzzleHost(this, from, m); break;
+      case 'BODY_PUSH': dynHostPush(this, from, m); break;
       case 'ENV': envHost(this, from, m); break;
       case 'BOSS': bossHost(this, from, m); break;
       case 'PING': {
@@ -1722,6 +1734,7 @@ async function loadAssets() {
   return A;
 }
 const ASSETS = await loadAssets();
+await RAPIER.init(); // WASM rigid-body physics for dynamic world objects (crates, seed-stones)
 const assetNode = (key, name) => ASSETS[key] ? ASSETS[key].scene.getObjectByName(name) : null;
 // Bake a Blender prop into the static batch at a placement, with materials chosen by role name.
 function putAsset(obj, matFor, x, y, z, ry = 0, s = 1) {
@@ -1894,6 +1907,7 @@ game.apply = m => {
       if (m.world && m.world.puzzles && typeof m.world.puzzles === 'object') applyPuzzleAll(m.world.puzzles);
       if (m.world && m.world.env) applyEnv(m.world.env);
       if (m.world && m.world.boss) applyBoss(m.world.boss);
+      if (m.world && Array.isArray(m.world.bodies)) dynApply(m.world.bodies, true);
       for (const pid of Array.isArray(m.world && m.world.taken) ? m.world.taken : []) if (game.validPid(pid)) world.setPickupAvailable(pid, false);
       for (const p of Array.isArray(m.players) ? m.players.slice(0, CFG.MAX_PLAYERS) : []) if (p && p.id !== id) game.addRemote(p.id, p.name, p.color, p.p, p.r, p.s, p.look);
       renderObjectives(); break;
@@ -1930,6 +1944,7 @@ game.apply = m => {
     case 'BOSS_STATE': applyBoss(m.s); break;
     case 'BOSS_WAVE': onBossWave(); break;
     case 'PUZZLE_STATE': if (typeof m.id === 'string') applyPuzzleState(m.id, m.s); break;
+    case 'BODIES': if (!game.net.isAuthority && Array.isArray(m.b)) dynApply(m.b, false); break;
     case 'PICKUP_RESPAWN': if (game.validPid(m.pid)) world.setPickupAvailable(m.pid, true); break;
     case 'REFUND': { const res = safeRes(m.res); for (const k of RES) game.inventory[k] += res[k] || 0; renderInventory(); if (ui.panelNode) renderNodePanel(); break; }
     case 'CHAT': { const text = safeText(m.text); if (text) { chatLine(safeName(m.name), safeColor(m.color), text); sfx.play('chat'); } break; }
@@ -2797,7 +2812,7 @@ const keyGroup = new THREE.Group(); keyGroup.position.set(KEY_POS[0], 1.6, KEY_P
 world.put(cylGeo(0.5, 0.65, 1.1, 16, TEX.stone), vMat, KEY_POS[0], 0.55, KEY_POS[2]);
 { const km = glowMat(0xffd54f, 0.6); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.06, 8, 20), km); ring.position.y = 0.35; keyGroup.add(ring); const bar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 0.08), km); keyGroup.add(bar); const t = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.08), km); t.position.set(0.1, -0.22, 0); keyGroup.add(t); }
 const plates = PLATE_POS.map(([x, z]) => { const mat = glowMat(0x8bd34a, 0.05); const m = new THREE.Mesh(cylGeo(1.2, 1.3, 0.18, 32), mat); m.position.set(x, 0.09, z); m.receiveShadow = true; scene.add(m); const rune = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.06, 6, 24), mat); rune.rotation.x = Math.PI / 2; rune.position.set(x, 0.2, z); scene.add(rune); return { mat, m }; });
-const stones = STONE_HOME.map((_, i) => { const g = new THREE.Group(); scene.add(g); const r = new THREE.Mesh(rockGeo(0.6, 30 + i), toon(0xa59a8a)); r.position.y = 0.5; r.castShadow = true; g.add(r); const seed = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.05, 6, 20), glowMat(0x8bd34a, 0.5)); seed.position.y = 0.55; seed.rotation.y = i; g.add(seed); return g; });
+const stones = STONE_HOME.map((_, i) => { const g = new THREE.Group(); scene.add(g); const r = new THREE.Mesh(rockGeo(0.6, 30 + i), toon(0xa59a8a)); r.castShadow = true; g.add(r); const seed = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.05, 6, 20), glowMat(0x8bd34a, 0.5)); seed.position.y = 0.05; seed.rotation.y = i; g.add(seed); return g; });
 stones.forEach((g, i) => addInteract({ get pos() { return g.position.clone().setY(g.position.y + 0.6); }, range: 2.6, label: () => { const st = game.puzzles.plates.stones[i]; return !st.c && !myStone() ? '<span class="key">E</span> Lift the seed-stone' : null; }, act: () => puzzleSend('plates', 'pick', { i }) }));
 addInteract({ pos: VA(KEY_POS).setY(1.6), range: 3, label: () => { const Pl = game.puzzles.plates; return Pl.solved && !Pl.key ? '<span class="key">E</span> Claim the Grotto Key' : null; }, act: () => puzzleSend('plates', 'claim') });
 const myStone = () => game.puzzles.plates.stones.findIndex(s => s.c === game.net.selfId) + 1;
@@ -3052,6 +3067,7 @@ function applyPuzzleState(id, raw) {
     }
     if (s.solved && !prev.solved && game.playing) { sfx.play('restore'); world.burst(CHP.clone().setY(3), 0x7ff0ff, 200); game.toast('🌀 The Songbird Stone sings! The Sky Portal has awoken.', true); }
   } else if (id === 'plates') {
+    dynSyncStoneState(s);
     s.pressed.forEach((p, i) => { if (p && !prev.pressed[i] && game.playing) sfx.play('plate'); });
     if (s.solved && !prev.solved) { doorCol.enabled = false; world.tween(2.2, k => doorMesh.position.y = 2.1 - k * 4.3); if (game.playing) { sfx.play('door'); game.toast('🚪 The Root Vault rumbles open!', true); } }
     if (s.solved) doorCol.enabled = false;
@@ -3073,10 +3089,10 @@ function puzzleVisuals(dt) {
   songbird.position.y = 1.75 + (songbird.userData.sing > 0 ? Math.abs(Math.sin(t * 10)) * 0.12 : 0); songbird.rotation.y = Math.sin(t * 0.5) * 0.4;
   songRing.material.emissiveIntensity = P.chimes.solved ? 0.9 : P.chimes.phase === 'input' ? 0.5 + Math.sin(t * 6) * 0.3 : 0.1;
   P.plates.pressed.forEach((p, i) => { plates[i].mat.emissiveIntensity = P.plates.solved ? 0.9 : p ? 1.2 : 0.05; });
-  P.plates.stones.forEach((st, i) => {
-    const g = stones[i]; let target;
-    if (st.c) { const carrier = st.c === game.net.selfId ? player.pos : (game.remotes.get(st.c) || {}).pos; target = carrier ? carrier.clone().add(new V3(0, 2.15, 0)) : VA(st.p); }
-    else target = VA(st.p);
+  P.plates.stones.forEach((st, i) => { // resting/rolling stones are drawn by the physics layer (dynStep); here only carried ones
+    if (!st.c) return;
+    const g = stones[i], carrier = st.c === game.net.selfId ? player.pos : (game.remotes.get(st.c) || {}).pos;
+    const target = carrier ? carrier.clone().add(new V3(0, 2.15 + STONE_R, 0)) : VA(st.p).setY(st.p[1] + STONE_R);
     g.position.lerp(target, Math.min(1, dt * 14)); if (g.position.distanceTo(target) > 6) g.position.copy(target);
   });
   keyGroup.visible = !P.plates.key; keyGroup.rotation.y += dt * 1.5; keyGroup.position.y = 1.7 + Math.sin(t * 2) * 0.1;
@@ -3085,6 +3101,132 @@ function puzzleVisuals(dt) {
   grottoOrb.visible = P.mirrors.solved && !QS.orbs.grotto; grottoOrb.rotation.y += dt; grottoOrb.position.y = 1.9 + Math.sin(t * 2) * 0.12;
   skyOrb.visible = !QS.orbs.sky; skyOrb.rotation.y += dt; skyOrb.position.y = SKY_SHRINE.y + 1.9 + Math.sin(t * 2) * 0.12;
 }
+// =====================================================================
+// DYNAMIC PHYSICS (Rapier) — the authority (host / solo) simulates; clients render snapshots.
+// Bodies are created in the same order on every peer, so a body's index is its network id.
+// =====================================================================
+const STONE_R = 0.55;
+const DYN = { list: [], stones: [], acc: 0, sendAcc: 0, time: 0, pushT: -1, STEP: 1 / 60, SEND_HZ: 15 };
+const _dq = new THREE.Quaternion(), _dm = new THREE.Matrix4();
+function dynAdd(kind, mesh, pos, o = {}) { // kind: 'box' (o.size [w,h,d]) | 'ball' (o.r) | 'cyl' (o.r, o.h)
+  const half = kind === 'ball' ? new V3(o.r, o.r, o.r) : kind === 'cyl' ? new V3(o.r, o.h / 2, o.r) : new V3(o.size[0] / 2, o.size[1] / 2, o.size[2] / 2);
+  const body = phys.rw.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setLinearDamping(o.ldamp ?? 0.3).setAngularDamping(o.adamp ?? 0.6));
+  const cd = kind === 'ball' ? RAPIER.ColliderDesc.ball(o.r) : kind === 'cyl' ? RAPIER.ColliderDesc.cylinder(o.h / 2, o.r) : RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z);
+  phys.rw.createCollider(cd.setDensity(o.density ?? 1).setFriction(o.friction ?? 0.8).setRestitution(o.bounce ?? 0.05), body);
+  const e = { i: DYN.list.length, kind, body, mesh, half, home: pos.clone(), box: phys.addDyn(o.tag || 'crate'), tp: pos.clone(), tq: new THREE.Quaternion(), held: false, push: null, sentSleep: false, pushSpeed: o.pushSpeed ?? 3, stone: o.stone ?? -1 };
+  e.box.dyn = e; mesh.position.copy(pos); if (!mesh.parent) scene.add(mesh); DYN.list.push(e); dynProxy(e); return e;
+}
+function dynProxy(e) { // world AABB of the (possibly tumbling) body, from its rendered pose
+  const b = e.box; b.enabled = !e.held; if (e.held) return;
+  const p = e.mesh.position, h = e.half;
+  let ex = h.x, ey = h.y, ez = h.z;
+  if (e.kind !== 'ball') { const m = _dm.makeRotationFromQuaternion(e.mesh.quaternion).elements; ex = Math.abs(m[0]) * h.x + Math.abs(m[4]) * h.y + Math.abs(m[8]) * h.z; ey = Math.abs(m[1]) * h.x + Math.abs(m[5]) * h.y + Math.abs(m[9]) * h.z; ez = Math.abs(m[2]) * h.x + Math.abs(m[6]) * h.y + Math.abs(m[10]) * h.z; }
+  b.min.set(p.x - ex, p.y - ey, p.z - ez); b.max.set(p.x + ex, p.y + ey, p.z + ez);
+}
+const dynPose = e => { const t = e.body.translation(), r = e.body.rotation(); return [e.i, +t.x.toFixed(2), +t.y.toFixed(2), +t.z.toFixed(2), +r.x.toFixed(3), +r.y.toFixed(3), +r.z.toFixed(3), +r.w.toFixed(3)]; };
+function dynSnapshot() { return DYN.list.map(e => e.held ? [e.i, ...e.mesh.position.toArray().map(v => +v.toFixed(2)), 0, 0, 0, 1] : dynPose(e)); }
+function dynPlace(e, p, q) { // authority only: teleport a body and let it settle
+  e.body.setTranslation({ x: p.x, y: p.y, z: p.z }, true); if (q) e.body.setRotation(q, true);
+  e.body.setLinvel({ x: 0, y: 0, z: 0 }, true); e.body.setAngvel({ x: 0, y: 0, z: 0 }, true); e.sentSleep = false;
+  e.mesh.position.copy(p); if (q) e.mesh.quaternion.copy(q); e.tp.copy(p);
+}
+// client: apply host snapshot [i, x,y,z, qx,qy,qz,qw]
+function dynApply(arr, snap) {
+  for (const it of arr.slice(0, DYN.list.length)) {
+    if (!Array.isArray(it) || it.length !== 8) continue;
+    const e = DYN.list[safeInt(it[0], 0, DYN.list.length - 1)], v = it.slice(1).map(Number); if (!e || v.some(n => !Number.isFinite(n) || Math.abs(n) > 5000)) continue;
+    e.tp.set(v[0], v[1], v[2]); e.tq.set(v[3], v[4], v[5], v[6]); if (e.tq.lengthSq() < 0.5) e.tq.identity(); else e.tq.normalize();
+    if (snap || e.mesh.position.distanceTo(e.tp) > 8) { e.mesh.position.copy(e.tp); e.mesh.quaternion.copy(e.tq); }
+    if (e.stone >= 0) { const st = game.puzzles.plates.stones[e.stone]; if (st && !st.c) st.p = [v[0], +(v[1] - STONE_R).toFixed(2), v[2]]; }
+  }
+}
+// a client that loses its host takes over the simulation from what it was showing
+function dynBecomeAuthority() { for (const e of DYN.list) { e.body.setEnabled(!e.held); if (!e.held) dynPlace(e, e.mesh.position.clone(), e.mesh.quaternion.clone()); } }
+// walking into a body asks the authority to shove it (rate-limited; same path for host and clients)
+function dynRequestPush(e, mx, mz) {
+  if (DYN.time - DYN.pushT < 0.09) return; DYN.pushT = DYN.time;
+  const l = Math.hypot(mx, mz) || 1; game.net.send({ t: 'BODY_PUSH', i: e.i, d: [+(mx / l).toFixed(2), +(mz / l).toFixed(2)] });
+}
+function dynHostPush(net, from, m) {
+  if (!DYN.list.length || !Array.isArray(m.d)) return;
+  const e = DYN.list[safeInt(m.i, 0, DYN.list.length - 1)]; if (!e || e.held) return;
+  const dx = safeNum(m.d[0], -1, 1, 0), dz = safeNum(m.d[1], -1, 1, 0), l = Math.hypot(dx, dz); if (l < 0.5) return;
+  const sp = senderPos(net, from), t = e.body.translation(); if (!sp || Math.hypot(sp.x - t.x, sp.z - t.z) > Math.max(e.half.x, e.half.z) + 2.2) return;
+  e.push = { x: dx / l, z: dz / l, t: 0.2 }; e.body.wakeUp();
+}
+// carried seed-stones leave the simulation; dropped ones are placed where the puzzle state says
+function dynSyncStoneState(s) {
+  s.stones.forEach((st, k) => {
+    const e = DYN.stones[k]; if (!e) return;
+    const held = !!st.c, auth = game.net.isAuthority, base = VA(st.p).setY(st.p[1] + STONE_R);
+    if (held !== e.held) { e.held = held; if (auth) e.body.setEnabled(!held); dynProxy(e); }
+    if (held) return;
+    if (auth) { if (e.body.translation().y < -50 || base.distanceTo(e.body.translation()) > 0.3) dynPlace(e, base.add(new V3(0, 0.25, 0))); } // drop / load: small fall onto the spot
+    else if (base.distanceTo(e.tp) > 3) e.tp.copy(base);
+  });
+}
+function dynStep(dt) {
+  const net = game.net; DYN.time += dt;
+  if (net.isAuthority) {
+    phys.syncColliders();
+    DYN.acc = Math.min(DYN.acc + dt, DYN.STEP * 3);
+    while (DYN.acc >= DYN.STEP) {
+      DYN.acc -= DYN.STEP;
+      for (const e of DYN.list) if (e.push) {
+        e.push.t -= DYN.STEP; if (e.push.t <= 0) { e.push = null; continue; }
+        const v = e.body.linvel(), k = Math.min(1, 30 * DYN.STEP);
+        e.body.setLinvel({ x: v.x + (e.push.x * e.pushSpeed - v.x) * k, y: v.y, z: v.z + (e.push.z * e.pushSpeed - v.z) * k }, true);
+      }
+      phys.rw.step();
+    }
+    for (const e of DYN.list) {
+      if (e.held) continue;
+      const t = e.body.translation();
+      if (t.y < -20) { dynPlace(e, e.home.clone(), _dq.identity()); continue; } // fell off the island
+      e.mesh.position.set(t.x, t.y, t.z); const r = e.body.rotation(); e.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      if (e.stone >= 0 && net.auth) { const p = [+t.x.toFixed(2), +(t.y - STONE_R).toFixed(2), +t.z.toFixed(2)]; for (const P of [net.auth.puzzles, game.puzzles]) { const st = P.plates.stones[e.stone]; if (!st.c) st.p = p; } }
+    }
+    if (net.mode === 'host' && net.conns.size && (DYN.sendAcc += dt) >= 1 / DYN.SEND_HZ) {
+      DYN.sendAcc = 0; const b = [];
+      for (const e of DYN.list) { if (e.held) continue; const sl = e.body.isSleeping(); if (sl && e.sentSleep) continue; e.sentSleep = sl; b.push(dynPose(e)); }
+      if (b.length) net.broadcast({ t: 'BODIES', b }, net.selfId);
+    }
+  } else {
+    const k = Math.min(1, dt * 12);
+    for (const e of DYN.list) if (!e.held) { e.mesh.position.lerp(e.tp, k); e.mesh.quaternion.slerp(e.tq, k); }
+  }
+  for (const e of DYN.list) dynProxy(e);
+}
+player.onPush = dynRequestPush;
+
+// ----- content: the vault's seed-stones roll, and crates & barrels sit around the town -----
+stones.forEach((g, k) => { const [x, z] = STONE_HOME[k]; DYN.stones[k] = dynAdd('ball', g, new V3(x, STONE_R, z), { r: STONE_R, density: 2.5, stone: k, tag: 'stone', ldamp: 0.8, adamp: 1.6, pushSpeed: 3.5 }); });
+{
+  const crateMat = toon(PAL.wood, { map: TEX.wood }), bandMat = toon(0x6b4423), barrelMat = toon(0x9c6b3f, { map: TEX.wood }), hoopMat = toon(PAL.metal);
+  const crateMesh = s => { const g = new THREE.Group(), c = new THREE.Mesh(boxGeo(s, s, s, TEX.wood.userData.world, 0.05), crateMat); c.castShadow = c.receiveShadow = true; g.add(c);
+    for (const y of [-0.36, 0.36]) { const b = new THREE.Mesh(boxGeo(s + 0.04, s * 0.1, s + 0.04, 0, 0.02), bandMat); b.position.y = y * s; g.add(b); } return g; };
+  const barrelMesh = (r, h) => { const g = new THREE.Group(), c = new THREE.Mesh(cylGeo(r * 0.92, r * 0.92, h, 16, TEX.wood), barrelMat); c.castShadow = c.receiveShadow = true; g.add(c);
+    for (const y of [-0.32, 0.32]) { const b = new THREE.Mesh(cylGeo(r * 0.97, r * 0.97, h * 0.07, 16), hoopMat); b.position.y = y * h; g.add(b); } return g; };
+  const free = (x, y, z, hx, hy, hz) => { for (const dx of [-hx, 0, hx]) for (const dz of [-hz, 0, hz]) if (phys.pointInside(new V3(x + dx * 0.95, y + hy, z + dz * 0.95))) return false; return true; };
+  const ground = (x, z) => phys.surfaceY(x, z, 1.5) ?? 0;
+  // [kind, x, z, size | [r,h], stackOn?]  — stacks reference the previous spot
+  const SPOTS = [
+    ['crate', 12.5, 52, 1.1], ['crate', 13.8, 52.3, 1.1], ['crate', 13.1, 52.1, 0.9, true], ['barrel', 10.8, 49.5, [0.45, 1.1]], ['barrel', 15.6, 50.4, [0.45, 1.1]],
+    ['crate', 47, -45, 1.1], ['crate', 48.3, -45.2, 1.0], ['barrel', 49.5, -31, [0.45, 1.1]], ['crate', 46.5, -31.5, 1.2],
+    ['crate', -62, 38, 1.1], ['crate', -63.3, 38.4, 1.1], ['crate', -62.6, 38.2, 0.9, true], ['barrel', -60, 35.5, [0.45, 1.1]],
+  ];
+  let lastTop = null;
+  for (const [kind, x, z, sz, stack] of SPOTS) {
+    const [hx, hy] = kind === 'crate' ? [sz / 2, sz / 2] : [sz[0], sz[1] / 2];
+    const y = stack ? lastTop : ground(x, z);
+    if (y === null || (!stack && !free(x, y, z, hx, hy, hx))) { lastTop = null; continue; }
+    const pos = new V3(x, y + hy + 0.01, z);
+    if (kind === 'crate') dynAdd('box', crateMesh(sz), pos, { size: [sz, sz, sz], density: 0.6, friction: 0.6 });
+    else dynAdd('cyl', barrelMesh(sz[0], sz[1]), pos, { r: sz[0], h: sz[1], density: 0.5, friction: 0.6, pushSpeed: 2.5 });
+    lastTop = y + 2 * hy;
+  }
+}
+
 // rehome any pickups that ended up inside the new scenery
 for (const p of world.pickups) if (phys.pointInside(p.pos) || phys.pointInside(p.pos.clone().setY(p.pos.y + 1))) { const top = phys.surfaceY(p.pos.x, p.pos.z, p.pos.y + 12); if (top !== null) { p.pos.y = top + 0.9; p.mesh.position.y = p.pos.y; } }
 world.finalizeStatics();
@@ -3205,7 +3347,7 @@ function scatterForage(type, n, cx, cz, rad, maxY, seed, filter) {
   const r = mulberry32(seed); let k = 0;
   for (let t = 0; t < n * 40 && k < n; t++) {
     const a = r() * Math.PI * 2, d = Math.sqrt(r()) * rad, x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
-    const b = phys.surfaceBox(x, z, maxY); if (!b || ['roof', 'lamp', 'post', 'tree', 'bounce', 'npc', 'portal'].includes(b.tag)) continue;
+    const b = phys.surfaceBox(x, z, maxY); if (!b || ['roof', 'lamp', 'post', 'tree', 'bounce', 'npc', 'portal', 'crate', 'stone'].includes(b.tag)) continue;
     const y = b.max.y; if (phys.pointInside(new V3(x, y + 0.5, z)) || (filter && !filter(x, y, z))) continue;
     if (forage.some(f => f.pos.distanceTo(new V3(x, y + 0.55, z)) < 4)) continue;
     addForage(type, x, y, z); k++;
@@ -3752,6 +3894,7 @@ function simulate(dt) {
     if (pressed.has('Escape') && ui.mg) closeMinigame();
     updateMinigame(dt);
     const inp = readInput();
+    dynStep(dt);
     player.update(dt, inp, cam.yaw);
     featureInput();
     for (const ev of player.events.splice(0)) { sfx.play(ev); if (ev === 'respawn') game.toast('🍃 The wind spirits carried you back to safety.'); else if (ev === 'exhausted') game.toast('😮‍💨 Out of stamina! Rest on flat ground.'); }
